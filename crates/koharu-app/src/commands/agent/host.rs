@@ -17,10 +17,11 @@ use crate::commands::{
     ChannelExt as _,
     canvas::{CanvasChannel, Point},
     editing::{GeometryUpdate, TypographyUpdate},
+    lifecycle::ProjectChannel,
     output,
     preferences::Preferences,
     processing::{JobId, Processing},
-    project::{CurrentProject, Project, Typography},
+    project::{CurrentProject, Project, ProjectInfo, Typography},
 };
 
 #[derive(Clone)]
@@ -100,7 +101,7 @@ impl KoharuHost {
             (commit, value, project.active_page(), project.info())
         };
         let revision = commit.revision;
-        self.synchronize(commit, page).await?;
+        self.synchronize(commit, page, project.clone()).await?;
         Invocation::changed(json!({
             "revision": revision,
             "project": project,
@@ -108,11 +109,23 @@ impl KoharuHost {
         }))
     }
 
-    async fn synchronize(&self, commit: Commit, page: Option<EntityId>) -> Result<()> {
+    /// Presents a committed agent change. Agent tools also run outside the
+    /// agent panel (over MCP), so the project info is published for the UI to
+    /// refresh its project, page, and layer queries.
+    async fn synchronize(
+        &self,
+        commit: Commit,
+        page: Option<EntityId>,
+        project: ProjectInfo,
+    ) -> Result<()> {
         let desktop = self.handle.state::<Desktop>();
         desktop.synchronize(&commit.snapshot, page, &commit).await?;
         let canvas = desktop.canvas_state();
         self.handle.state::<CanvasChannel>().channel.publish(canvas);
+        self.handle
+            .state::<ProjectChannel>()
+            .channel
+            .publish(Some(project));
         Ok(())
     }
 
@@ -463,7 +476,7 @@ struct AgentCommitter {
 #[async_trait]
 impl Committer for AgentCommitter {
     async fn commit(&mut self, output: StageOutput) -> Result<Snapshot> {
-        let (commit, page) = {
+        let (commit, page, info) = {
             let current = self.host.handle.state::<CurrentProject>();
             let mut current = current.project.lock().await;
             let project = current.as_mut().context("no project is open")?;
@@ -471,10 +484,10 @@ impl Committer for AgentCommitter {
                 return Ok(project.snapshot());
             };
             project.record_commit(&commit);
-            (commit, project.active_page())
+            (commit, project.active_page(), project.info())
         };
         let snapshot = commit.snapshot.clone();
-        self.host.synchronize(commit, page).await?;
+        self.host.synchronize(commit, page, info).await?;
         Ok(snapshot)
     }
 }

@@ -6,7 +6,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { call } from '@/lib/backend'
-import { pageKey, pagesKey, projectKey, refresh } from '@/lib/queries'
 import {
   commands,
   type AgentStatus,
@@ -306,7 +305,6 @@ export function AgentPanel() {
           setActivity(t('agent.applying'))
           break
         case 'tool_finished':
-          if (event.changed) void refresh(projectKey, pagesKey, pageKey)
           setActivity(t('agent.working'))
           break
         case 'completed':
@@ -314,7 +312,6 @@ export function AgentPanel() {
           updateAssistant(() => event.message)
           setRunning(null)
           setActivity(null)
-          void refresh(projectKey, pagesKey, pageKey)
           break
         case 'failed':
           settled = true
