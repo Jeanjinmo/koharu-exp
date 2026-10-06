@@ -159,6 +159,13 @@ pub fn run(context: tauri::Context<CefRuntime>) -> Result<()> {
                     .await
                     .expect("failed to initialize the desktop runtime");
                 initialization_handle.state::<Initialization>().ready();
+                if let Err(error) = initialization_handle
+                    .state::<AgentState>()
+                    .start_mcp(initialization_handle.clone())
+                    .await
+                {
+                    tracing::error!("the MCP server is unavailable: {error:#}");
+                }
             }));
 
             let mut downloads = koharu_runtime::download::subscribe();
@@ -267,7 +274,9 @@ pub fn run(context: tauri::Context<CefRuntime>) -> Result<()> {
                 }
                 processing.stops.lock().clear();
                 processing.jobs.lock().clear();
-                window.state::<AgentState>().cancel_all();
+                let agent = window.state::<AgentState>();
+                agent.cancel_all();
+                agent.stop_mcp();
             }
             if matches!(event, WindowEvent::Destroyed) {
                 tracing::info!(

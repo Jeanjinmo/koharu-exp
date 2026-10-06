@@ -127,6 +127,7 @@ export function AgentPanel() {
                   ? selected.reasoning[0]
                   : status.config.reasoning
               void saveConfig({
+                ...status.config,
                 model: model === 'automatic' ? null : model,
                 reasoning,
               })

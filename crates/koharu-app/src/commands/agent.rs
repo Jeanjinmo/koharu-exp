@@ -3,7 +3,9 @@ mod host;
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context as _, Result, anyhow};
-use koharu_agent::{Account, Agent, Codex, CodexModel, Config, Control, Event, LoginEvent, RunId};
+use koharu_agent::{
+    Account, Agent, Codex, CodexModel, Config, Control, Event, LoginEvent, RunId, mcp,
+};
 use parking_lot::Mutex;
 use serde::Serialize;
 use specta::Type;
@@ -27,6 +29,7 @@ pub(crate) struct AgentState {
     runs: Mutex<HashMap<RunId, Control>>,
     login: Mutex<Option<Control>>,
     idle: Notify,
+    mcp: Mutex<Option<mcp::Server>>,
 }
 
 impl AgentState {
@@ -36,7 +39,21 @@ impl AgentState {
             runs: Mutex::new(HashMap::new()),
             login: Mutex::new(None),
             idle: Notify::new(),
+            mcp: Mutex::new(None),
         })
+    }
+
+    /// Exposes the agent tools to external MCP clients. Call this only after
+    /// the desktop runtime is initialized, because tools such as `run_pipeline`
+    /// depend on state managed during initialization.
+    pub(crate) async fn start_mcp(&self, handle: AppHandle<CefRuntime>) -> Result<()> {
+        let server = mcp::serve(KoharuHost::new(handle), self.agent.config()?.mcp).await?;
+        *self.mcp.lock() = Some(server);
+        Ok(())
+    }
+
+    pub(crate) fn stop_mcp(&self) {
+        self.mcp.lock().take();
     }
 
     async fn status(&self) -> Result<AgentStatus> {

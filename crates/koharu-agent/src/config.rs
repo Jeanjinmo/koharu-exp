@@ -6,6 +6,7 @@ use specta::Type;
 pub struct Config {
     pub model: Option<String>,
     pub reasoning: Reasoning,
+    pub mcp: McpConfig,
 }
 
 impl Config {
@@ -36,5 +37,17 @@ impl Reasoning {
             Self::Max => "max",
             Self::Ultra => "ultra",
         }
+    }
+}
+
+/// Settings for the loopback MCP server, read once when the server starts.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, Type)]
+pub struct McpConfig {
+    pub port: u16,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self { port: 47821 }
     }
 }

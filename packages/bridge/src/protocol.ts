@@ -137,6 +137,7 @@ export type CodexModel = {
 export type Config = {
 	model: string | null,
 	reasoning: Reasoning,
+	mcp: McpConfig,
 };
 
 export type CredentialInput = {
@@ -309,6 +310,11 @@ export type LmStudioConfig = {
 export type LocalConfig = Record<string, never>;
 
 export type LoginEvent = { type: "progress"; message: string } | { type: "device_code"; verification_url: string; user_code: string };
+
+/**  Settings for the loopback MCP server, read once when the server starts. */
+export type McpConfig = {
+	port: number,
+};
 
 export type MiniMaxConfig = Record<string, never>;
 

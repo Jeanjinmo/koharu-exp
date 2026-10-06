@@ -89,6 +89,14 @@ enumflags2 = "0.7.12"
 reqwest = { version = "0.13.5", features = ["stream", "json", "form", "blocking", "multipart"] }
 reqwest-middleware = "0.5.2"
 reqwest-retry = "0.9.1"
+rmcp = { version = "3.5.1", default-features = false, features = [
+    "server",
+    "transport-streamable-http-server",
+] }
+hyper = { version = "1.11.1", features = ["http1", "server"] }
+hyper-util = { version = "0.1.20", features = ["tokio"] }
+http-body-util = "0.1.5"
+tokio-util = "0.7.19"
 secrecy = { version = "0.10.3", features = ["serde"] }
 toml = "1.1.5"
 url = { version = "2.5.8", features = ["serde"] }
