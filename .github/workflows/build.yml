@@ -2,8 +2,9 @@ name: Build
 
 on:
   push:
-    branches: ['main']
+    branches: ['main', 'feat/**']
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,7 +17,8 @@ jobs:
     name: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest, ubuntu-24.04-arm]
+        # koharu-exp: only the Windows build is used for local testing.
+        os: [windows-latest]
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
@@ -39,7 +41,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: koharu-app-${{ matrix.os }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name != 'pull_request' }}
       - name: Install macOS CEF helper targets
         if: startsWith(matrix.os, 'macos')
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
