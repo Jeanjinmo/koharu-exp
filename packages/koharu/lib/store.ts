@@ -32,7 +32,19 @@ export interface CanvasBrush {
   color: string
 }
 export type InspectorSection = 'copy' | 'type' | 'layers'
-export type ShortcutAction = CanvasTool | 'fit'
+export type ShortcutAction = CanvasTool | 'fit' | 'compare'
+/** How Compare shows the original beside the editable result. */
+export type CompareMode = 'side_by_side' | 'slider' | 'peek'
+export const compareModes: readonly CompareMode[] = ['side_by_side', 'slider', 'peek']
+
+export interface Compare {
+  open: boolean
+  mode: CompareMode
+  /** Hold to peek shows the original while the shortcut is held. */
+  peeking: boolean
+  /** Where the slider divides the page, from 0 (left edge) to 1 (right edge). */
+  split: number
+}
 export type Shortcuts = Record<ShortcutAction, string>
 export type PipelineScope = 'page' | 'selected-pages' | 'project'
 export type ProjectCleanup = 'clear' | 'free-space'
@@ -64,6 +76,7 @@ interface KoharuStore {
   processingStages: Stage[]
   settingsOpen: boolean
   cleanup: ProjectCleanup | null
+  compare: Compare
   shortcuts: Shortcuts
   selectPages: (pages: EntityId[]) => void
   showInspector: (section: InspectorSection) => void
@@ -71,6 +84,10 @@ interface KoharuStore {
   setProcessingStages: (stages: Stage[]) => void
   setSettingsOpen: (open: boolean) => void
   setCleanup: (cleanup: ProjectCleanup | null) => void
+  setCompareOpen: (open: boolean) => void
+  setCompareMode: (mode: CompareMode) => void
+  setComparePeeking: (peeking: boolean) => void
+  setCompareSplit: (split: number) => void
   selectLayers: (layers: EntityId[]) => void
   setTool: (tool: CanvasTool) => void
   setBrush: (brush: CanvasBrush) => void
@@ -89,6 +106,27 @@ export const defaultShortcuts: Shortcuts = {
   remove: 'j',
   pan: 'h',
   fit: '0',
+  compare: 'c',
+}
+
+const compareModeKey = 'koharu.compare.mode'
+
+// The last Compare mode is remembered on this device; storage may be unavailable.
+function rememberedCompareMode(): CompareMode {
+  try {
+    const mode = window.localStorage.getItem(compareModeKey)
+    return compareModes.find((candidate) => candidate === mode) ?? 'side_by_side'
+  } catch {
+    return 'side_by_side'
+  }
+}
+
+function rememberCompareMode(mode: CompareMode): void {
+  try {
+    window.localStorage.setItem(compareModeKey, mode)
+  } catch {
+    // The mode then lasts only for this session.
+  }
 }
 
 export const useKoharuStore = create<KoharuStore>()((set) => ({
@@ -116,6 +154,7 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   processingStages: [...pipelineStages],
   settingsOpen: false,
   cleanup: null,
+  compare: { open: false, mode: rememberedCompareMode(), peeking: false, split: 0.5 },
   shortcuts: defaultShortcuts,
   selectPages: (selectedPages) => set({ selectedPages: [...new Set(selectedPages)] }),
   showInspector: (inspector) => set({ inspector }),
@@ -123,6 +162,15 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   setProcessingStages: (processingStages) => set({ processingStages }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setCleanup: (cleanup) => set({ cleanup }),
+  setCompareOpen: (open) =>
+    set((state) => ({ compare: { ...state.compare, open, peeking: false } })),
+  setCompareMode: (mode) => {
+    rememberCompareMode(mode)
+    set((state) => ({ compare: { ...state.compare, mode, peeking: false } }))
+  },
+  setComparePeeking: (peeking) => set((state) => ({ compare: { ...state.compare, peeking } })),
+  setCompareSplit: (split) =>
+    set((state) => ({ compare: { ...state.compare, split: Math.min(1, Math.max(0, split)) } })),
   selectLayers: (selectedLayers) => set({ selectedLayers: [...new Set(selectedLayers)] }),
   setTool: (tool) => set({ tool }),
   setBrush: (brush) => set({ brush }),

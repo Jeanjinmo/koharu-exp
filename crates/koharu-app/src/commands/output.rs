@@ -13,7 +13,7 @@ use rayon::prelude::*;
 use serde::Deserialize;
 use specta::Type;
 use std::{
-    io::Write as _,
+    io::{Cursor, Write as _},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -34,6 +34,33 @@ impl IpcResponse for ThumbnailBytes {
         Ok(self.0.into())
     }
 }
+
+#[derive(Type)]
+#[specta(transparent)]
+pub(crate) struct ImageBytes(#[specta(type = Vec<u8>)] Vec<u8>);
+
+impl IpcResponse for ImageBytes {
+    fn body(self) -> tauri::Result<tauri::ipc::InvokeResponseBody> {
+        Ok(self.0.into())
+    }
+}
+
+/// An image that a page keeps besides its layers.
+#[derive(Clone, Copy, Debug, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PageImage {
+    /// The original artwork the page was imported from.
+    Source,
+}
+
+/// Image types the webview decodes; other stored types are converted to PNG.
+const WEB_IMAGE_TYPES: [&str; 5] = [
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    "image/bmp",
+];
 
 #[derive(Clone, Copy, Debug, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -326,6 +353,43 @@ pub(crate) async fn get_thumbnail(
     })
     .await?;
     Ok(ThumbnailBytes(bytes))
+}
+
+/// One of a page's images at full resolution, for showing it beside the
+/// editable canvas.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn get_page_image(
+    page: EntityId,
+    image: PageImage,
+    project: State<'_, CurrentProject>,
+) -> std::result::Result<ImageBytes, Error> {
+    let snapshot = project
+        .project
+        .lock()
+        .await
+        .as_ref()
+        .context("no project is open")?
+        .snapshot();
+    snapshot.page(page)?;
+    let role = match image {
+        PageImage::Source => "source",
+    };
+    let asset = snapshot
+        .asset(page, &AssetRole::new(role)?)?
+        .with_context(|| format!("page {page} has no {role} image"))?;
+    let bytes = snapshot.read_blob(asset.blob).await?;
+    if WEB_IMAGE_TYPES.contains(&asset.media_type.as_str()) {
+        return Ok(ImageBytes(bytes.to_vec()));
+    }
+    let png = tokio_rayon::spawn(move || -> Result<Vec<u8>> {
+        let image = image::load_from_memory(&bytes).context("failed to decode the page image")?;
+        let mut png = Cursor::new(Vec::new());
+        image.write_to(&mut png, image::ImageFormat::Png)?;
+        Ok(png.into_inner())
+    })
+    .await?;
+    Ok(ImageBytes(png))
 }
 
 /// A rendered page, or part of one, prepared for a vision model.

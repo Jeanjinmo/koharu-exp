@@ -315,6 +315,7 @@ function ShortcutPreferences() {
     'remove',
     'pan',
     'fit',
+    'compare',
   ]
   return (
     <PreferencePage
@@ -352,4 +353,5 @@ const shortcutKeys: Record<ShortcutAction, string> = {
   remove: 'tools.remove',
   pan: 'tools.pan',
   fit: 'canvas.fit',
+  compare: 'compare.title',
 }

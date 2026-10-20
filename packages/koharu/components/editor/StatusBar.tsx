@@ -2,6 +2,7 @@
 
 import { useTranslation } from 'react-i18next'
 
+import { CompareButton } from '@/components/editor/Compare'
 import { usePage } from '@/lib/queries'
 import { useKoharuStore } from '@/lib/store'
 import { Slider } from '@koharu/ui/components/slider'
@@ -30,6 +31,7 @@ export function StatusBar({ onZoomChange }: StatusBarProps) {
         />
         <span className='w-9 shrink-0 text-right text-foreground tabular-nums'>{zoom}%</span>
       </div>
+      {page && <CompareButton />}
       <div className='flex-1' />
       {page && (
         <span className='tabular-nums'>

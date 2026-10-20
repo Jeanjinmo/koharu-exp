@@ -83,6 +83,11 @@ export const commands = {
 	stopJob: (job: JobId) => __TAURI_INVOKE<null>("stop_job", { job }),
 	export: (format: ExportFormat) => __TAURI_INVOKE<null>("export", { format }),
 	getThumbnail: (page: EntityId) => __TAURI_INVOKE<ThumbnailBytes>("get_thumbnail", { page }),
+	/**
+	 *  One of a page's images at full resolution, for showing it beside the
+	 *  editable canvas.
+	 */
+	getPageImage: (page: EntityId, image: PageImage) => __TAURI_INVOKE<ImageBytes>("get_page_image", { page, image }),
 	getFonts: () => __TAURI_INVOKE<FontFamily[]>("get_fonts"),
 	getFontPreview: (familyName: string) => __TAURI_INVOKE<FontPreviewBytes>("get_font_preview", { familyName }),
 	savePreferences: (pipeline: PipelineConfig, providers: ProviderPreferences, typesetting: TypesettingConfig) => __TAURI_INVOKE<Preferences>("save_preferences", { pipeline: ({...pipeline,translation:({...pipeline.translation,generation:({...pipeline.translation.generation,temperature:pipeline.translation.generation.temperature==null?pipeline.translation.generation.temperature:pipeline.translation.generation.temperature,top_p:pipeline.translation.generation.top_p==null?pipeline.translation.generation.top_p:pipeline.translation.generation.top_p,min_p:pipeline.translation.generation.min_p==null?pipeline.translation.generation.min_p:pipeline.translation.generation.min_p,repeat_penalty:pipeline.translation.generation.repeat_penalty==null?pipeline.translation.generation.repeat_penalty:pipeline.translation.generation.repeat_penalty,frequency_penalty:pipeline.translation.generation.frequency_penalty==null?pipeline.translation.generation.frequency_penalty:pipeline.translation.generation.frequency_penalty,presence_penalty:pipeline.translation.generation.presence_penalty==null?pipeline.translation.generation.presence_penalty:pipeline.translation.generation.presence_penalty})}),processor:({...pipeline.processor,"koharu-layout-rfdetr-seg-2xl":pipeline.processor["koharu-layout-rfdetr-seg-2xl"]==null?pipeline.processor["koharu-layout-rfdetr-seg-2xl"]:({...pipeline.processor["koharu-layout-rfdetr-seg-2xl"],text_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold==null?pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold,bubble_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold==null?pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold,panel_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold==null?pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold})})}), providers, typesetting }).then((v) => (({...v,pipeline:({...v.pipeline,translation:({...v.pipeline.translation,generation:({...v.pipeline.translation.generation,temperature:v.pipeline.translation.generation.temperature==null?v.pipeline.translation.generation.temperature:v.pipeline.translation.generation.temperature,top_p:v.pipeline.translation.generation.top_p==null?v.pipeline.translation.generation.top_p:v.pipeline.translation.generation.top_p,min_p:v.pipeline.translation.generation.min_p==null?v.pipeline.translation.generation.min_p:v.pipeline.translation.generation.min_p,repeat_penalty:v.pipeline.translation.generation.repeat_penalty==null?v.pipeline.translation.generation.repeat_penalty:v.pipeline.translation.generation.repeat_penalty,frequency_penalty:v.pipeline.translation.generation.frequency_penalty==null?v.pipeline.translation.generation.frequency_penalty:v.pipeline.translation.generation.frequency_penalty,presence_penalty:v.pipeline.translation.generation.presence_penalty==null?v.pipeline.translation.generation.presence_penalty:v.pipeline.translation.generation.presence_penalty})}),processor:({...v.pipeline.processor,"koharu-layout-rfdetr-seg-2xl":v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"]==null?v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"]:({...v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"],text_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold==null?v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold,bubble_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold==null?v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold,panel_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold==null?v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold})})})}) as typeof v)),
@@ -291,6 +296,8 @@ export type GrokConfig = Record<string, never>;
 
 export type GroupRole = "text";
 
+export type ImageBytes = number[];
+
 export type InpaintingModel = { model: "lama" } | { model: "aot-inpainting" } | {
 	model: "flux2-klein",
 } & Flux2KleinConfig | {
@@ -434,6 +441,11 @@ export type Page = {
 	layers: Layer[],
 	regions: AnalysisRegion[],
 };
+
+/**  An image that a page keeps besides its layers. */
+export type PageImage = 
+/**  The original artwork the page was imported from. */
+"source";
 
 export type PageImportSource = "files" | "folder";
 

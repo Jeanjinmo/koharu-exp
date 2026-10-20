@@ -92,6 +92,20 @@
     "loading": "Loading…",
     "reset": "Reset"
   },
+  "compare": {
+    "close": "Close Compare",
+    "divider": "Comparison divider",
+    "mode": {
+      "peek": "Hold to peek",
+      "side_by_side": "Side by side",
+      "slider": "Slider"
+    },
+    "modes": "Compare mode",
+    "noOriginal": "This page has no original image.",
+    "original": "Original",
+    "peekHint": "Hold {{key}} to see the original",
+    "title": "Compare"
+  },
   "errors": {
     "fatalTitle": "Koharu could not continue",
     "tryAgain": "Try again"

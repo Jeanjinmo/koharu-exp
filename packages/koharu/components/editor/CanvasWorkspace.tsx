@@ -6,10 +6,12 @@ import { useTranslation } from 'react-i18next'
 import { useColorSampling } from '@/components/controls/ColorSampling'
 import { CanvasCommandBar } from '@/components/editor/CanvasCommandBar'
 import { CanvasOverlay } from '@/components/editor/CanvasOverlay'
+import { CompareOverlay, ComparePane } from '@/components/editor/Compare'
 import { StatusBar } from '@/components/editor/StatusBar'
 import { ToolBar } from '@/components/editor/ToolBar'
 import { useCanvas } from '@/components/editor/useCanvas'
 import { call } from '@/lib/backend'
+import { clamp, clampCameraTranslation, containCamera, wheelCamera } from '@/lib/camera'
 import { expandLayerSelection } from '@/lib/document'
 import {
   controlFrame,
@@ -70,11 +72,6 @@ interface StrokeGesture {
   color?: CanvasColor
 }
 
-interface CanvasView {
-  zoom: number
-  translation: [number, number]
-}
-
 interface StrokeUpdate {
   kind: 'paint' | 'erase' | 'inpaint'
   points: Point[]
@@ -114,6 +111,9 @@ export function CanvasWorkspace() {
   const setTool = useKoharuStore((state) => state.setTool)
   const setBrush = useKoharuStore((state) => state.setBrush)
   const requestCanvasFit = useKoharuStore((state) => state.requestCanvasFit)
+  const sideBySide = useKoharuStore(
+    (state) => state.compare.open && state.compare.mode === 'side_by_side',
+  )
   const canvasState = useCanvas(canvasElement, canvasRevision, canvasGeneration)
   const canvas = canvasState.canvas
   const pageId = page?.id
@@ -309,6 +309,23 @@ export function CanvasWorkspace() {
     fitCanvas()
   }, [fitCanvas, fitCanvasRequest])
 
+  // Side by side halves the canvas; closing it brings back the view from before.
+  useEffect(() => {
+    if (!sideBySide) return
+    const before = {
+      page: queryClient.getQueryData<{ id: string } | null>(pageKey)?.id,
+      camera: useKoharuStore.getState().camera,
+    }
+    return () => {
+      const page = queryClient.getQueryData<{ id: string } | null>(pageKey)?.id
+      if (before.page === page && !before.camera.fitted) {
+        useKoharuStore.setState({ camera: before.camera })
+      } else {
+        requestCanvasFit()
+      }
+    }
+  }, [requestCanvasFit, sideBySide])
+
   useEffect(() => cancelGesture, [cancelGesture, canvasGeneration, canvasRevision, page?.id, tool])
 
   useEffect(() => {
@@ -330,6 +347,17 @@ export function CanvasWorkspace() {
         return
       }
       const command = event.ctrlKey || event.metaKey
+      if (!command && !event.altKey && event.key.toLowerCase() === state.shortcuts.compare) {
+        event.preventDefault()
+        if (event.repeat) return
+        // Hold to peek shows the original only while the key is down.
+        if (state.compare.mode === 'peek') {
+          useKoharuStore.setState({ compare: { ...state.compare, open: true, peeking: true } })
+        } else {
+          state.setCompareOpen(!state.compare.open)
+        }
+        return
+      }
       if (command && event.key.toLowerCase() === 'z') {
         event.preventDefault()
         void call(event.shiftKey ? commands.redo : commands.undo)
@@ -371,10 +399,15 @@ export function CanvasWorkspace() {
     const up = (event: KeyboardEvent) => {
       if (event.key === 'Alt') event.preventDefault()
       if (event.code === 'Space') spaceHeld.current = false
+      const state = useKoharuStore.getState()
+      if (event.key.toLowerCase() === state.shortcuts.compare && state.compare.peeking) {
+        state.setComparePeeking(false)
+      }
     }
     const blur = () => {
       spaceHeld.current = false
       cancelGesture()
+      useKoharuStore.getState().setComparePeeking(false)
     }
 
     window.addEventListener('keydown', down)
@@ -528,6 +561,7 @@ export function CanvasWorkspace() {
     <main className='relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-tl-2xl bg-[var(--surface-canvas)]'>
       <CanvasCommandBar />
       <div className='relative flex min-h-0 min-w-0 flex-1'>
+        {sideBySide && page && <ComparePane page={page} />}
         <ToolBar />
         <div
           ref={surface}
@@ -706,40 +740,14 @@ export function CanvasWorkspace() {
               }
               return
             }
-            const point = clientPhysicalPoint(event.clientX, event.clientY)
-            const current = useKoharuStore.getState().camera
-            let zoom = current.zoom
-            let translation = current.translation
-            if (event.ctrlKey) {
-              zoom = clamp(current.zoom * Math.exp(-event.deltaY * 0.0015), 0.02, 16)
-              const pageX = (point.x - current.translation[0]) / current.zoom
-              const pageY = (point.y - current.translation[1]) / current.zoom
-              translation = [point.x - pageX * zoom, point.y - pageY * zoom]
-            } else {
-              const dpr = window.devicePixelRatio
-              let deltaX = event.deltaX
-              let deltaY = event.deltaY
-              if (event.shiftKey && deltaX === 0) {
-                deltaX = deltaY
-                deltaY = 0
-              }
-              translation = [
-                current.translation[0] - deltaX * dpr,
-                current.translation[1] - deltaY * dpr,
-              ]
-            }
-            const bounds = event.currentTarget.getBoundingClientRect()
-            const dpr = window.devicePixelRatio
-            translation = clampCameraTranslation(
-              translation,
-              zoom,
+            const next = wheelCamera(
+              useKoharuStore.getState().camera,
+              event,
+              event.currentTarget.getBoundingClientRect(),
               pageWidth ?? page.size.width,
               pageHeight ?? page.size.height,
-              bounds.width * dpr,
-              bounds.height * dpr,
-              dpr,
             )
-            useKoharuStore.setState({ camera: { zoom, translation, fitted: false } })
+            useKoharuStore.setState({ camera: { ...next, fitted: false } })
           }}
         >
           <canvas
@@ -748,6 +756,7 @@ export function CanvasWorkspace() {
             aria-hidden
             className='pointer-events-none absolute inset-0 block size-full'
           />
+          {page && canvasState.status === 'ready' && <CompareOverlay page={page} />}
           {page && canvasState.status === 'ready' && (
             <CanvasOverlay
               page={page}
@@ -828,57 +837,9 @@ function rgbaToHex(color: [number, number, number, number]): string {
     .join('')}`.toUpperCase()
 }
 
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.min(maximum, Math.max(minimum, value))
-}
-
-function containCamera(
-  viewportWidth: number,
-  viewportHeight: number,
-  pageWidth: number,
-  pageHeight: number,
-): CanvasView {
-  if (viewportWidth <= 0 || viewportHeight <= 0 || pageWidth <= 0 || pageHeight <= 0) {
-    return { zoom: 1, translation: [0, 0] }
-  }
-  const zoom = Math.max(
-    Number.EPSILON,
-    Math.min(viewportWidth / pageWidth, viewportHeight / pageHeight),
-  )
-  return {
-    zoom,
-    translation: [
-      (viewportWidth - pageWidth * zoom) * 0.5,
-      (viewportHeight - pageHeight * zoom) * 0.5,
-    ],
-  }
-}
-
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return typeof error === 'string' ? error : 'The WebGPU canvas returned an unknown error.'
-}
-
-function clampCameraTranslation(
-  translation: [number, number],
-  zoom: number,
-  pageWidth: number,
-  pageHeight: number,
-  viewportWidth: number,
-  viewportHeight: number,
-  dpr: number,
-): [number, number] {
-  const minOverlap = 100 * dpr
-  const minX = minOverlap - pageWidth * zoom
-  const minY = minOverlap - pageHeight * zoom
-  const maxX = viewportWidth - minOverlap
-  const maxY = viewportHeight - minOverlap
-
-  const x =
-    minX <= maxX ? clamp(translation[0], minX, maxX) : (viewportWidth - pageWidth * zoom) * 0.5
-  const y =
-    minY <= maxY ? clamp(translation[1], minY, maxY) : (viewportHeight - pageHeight * zoom) * 0.5
-  return [x, y]
 }
 
 function mergeStrokeUpdates(current: StrokeUpdate, next: StrokeUpdate): StrokeUpdate {

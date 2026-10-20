@@ -51,6 +51,9 @@ export function TitleBar() {
   const selectLayers = useKoharuStore((state) => state.selectLayers)
   const setSettingsOpen = useKoharuStore((state) => state.setSettingsOpen)
   const setCleanup = useKoharuStore((state) => state.setCleanup)
+  const compareOpen = useKoharuStore((state) => state.compare.open)
+  const setCompareOpen = useKoharuStore((state) => state.setCompareOpen)
+  const compareShortcut = useKoharuStore((state) => state.shortcuts.compare)
   const requestCanvasFit = useKoharuStore((state) => state.requestCanvasFit)
   const { importPages, importing } = useImportPages()
   const { run: exportProject, busy: exporting } = useCommand(
@@ -251,6 +254,10 @@ export function TitleBar() {
             <MenubarContent>
               <MenubarItem disabled={!page} onClick={requestCanvasFit}>
                 {t('menu.fit')}
+              </MenubarItem>
+              <MenubarItem disabled={!page} onClick={() => setCompareOpen(!compareOpen)}>
+                {compareOpen ? t('compare.close') : t('compare.title')}
+                <MenubarShortcut>{compareShortcut.toUpperCase()}</MenubarShortcut>
               </MenubarItem>
             </MenubarContent>
           </MenubarMenu>
