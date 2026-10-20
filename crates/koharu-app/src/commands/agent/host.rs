@@ -6,7 +6,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use koharu_agent::{Control, Host, Invocation, Tool, ToolCall, ToolGroup, ToolMetadata, Vision};
 use koharu_desktop::{Desktop, Frame};
 use koharu_pipeline::{
-    Committer, Operation, PipelineConfig, RunStatus, Scope, Stage, StageOutput, StopToken,
+    Bounds, Committer, Operation, PipelineConfig, RunStatus, Scope, Stage, StageOutput, StopToken,
 };
 use koharu_renderer::RenderDiagnostic;
 use koharu_scene::{Commit, EntityId, LanguageTag, Revision, Snapshot};
@@ -264,7 +264,7 @@ impl Host for KoharuHost {
                     ),
                     definition::<ViewPage>(
                         "view_page",
-                        "Render and inspect one page image. Call this only for pages whose visual appearance matters to the request.",
+                        "Render one page, or one region of it at full resolution, as an image. Call this only for pages whose visual appearance matters to the request. The result gives the page size and the area shown; convert image coordinates with page_x = view.x + image_x / view.scale and page_y = view.y + image_y / view.scale.",
                         ToolMetadata {
                             vision: Vision::Required,
                             ..metadata(ToolGroup::Read)
@@ -375,25 +375,32 @@ impl Host for KoharuHost {
             "view_page" => {
                 let arguments: ViewPage = arguments(&call)?;
                 let page = entity(&arguments.page)?;
-                let (label, snapshot) = {
-                    let current = self.handle.state::<CurrentProject>();
-                    let current = current.project.lock().await;
-                    let project = current.as_ref().context("no project is open")?;
-                    let snapshot = project.snapshot();
-                    let label = snapshot.page(page)?.page()?.label;
-                    (label, snapshot)
-                };
+                let snapshot = self.snapshot().await?;
+                let value = snapshot.page(page)?.page()?;
                 let desktop = self.handle.state::<Desktop>();
                 let renderer = desktop.renderer();
                 let rasterizer = desktop.rasterizer().await?;
-                let bytes =
-                    output::rendered_preview(&renderer, rasterizer, &snapshot, page).await?;
-                Ok(
-                    Invocation::read(json!({ "page": page, "label": label }))?.with_image(
-                        format!("Rendered page {label} ({page})"),
-                        format!("data:image/webp;base64,{}", STANDARD.encode(bytes)),
-                    ),
+                let preview = output::rendered_preview(
+                    &renderer,
+                    rasterizer,
+                    &snapshot,
+                    page,
+                    arguments.region.map(Into::into),
                 )
+                .await?;
+                let [x, y, width, height] = preview.area;
+                let label = value.label;
+                Ok(Invocation::read(json!({
+                    "page": page,
+                    "label": label,
+                    "width": value.width,
+                    "height": value.height,
+                    "view": { "x": x, "y": y, "width": width, "height": height, "scale": preview.scale },
+                }))?
+                .with_image(
+                    format!("Rendered page {label} ({page}), area {x},{y} {width}x{height}"),
+                    format!("data:image/webp;base64,{}", STANDARD.encode(preview.webp)),
+                ))
             }
             "rename_page" => {
                 let arguments: RenamePage = arguments(&call)?;
@@ -790,6 +797,28 @@ struct InspectPage {
 #[derive(Deserialize, JsonSchema)]
 struct ViewPage {
     page: String,
+    /// Page area to view at full resolution instead of the whole page.
+    region: Option<Rect>,
+}
+
+/// An axis-aligned rectangle in page pixels.
+#[derive(Clone, Copy, Deserialize, JsonSchema)]
+struct Rect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+impl From<Rect> for Bounds {
+    fn from(rect: Rect) -> Self {
+        Self {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]

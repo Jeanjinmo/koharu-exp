@@ -1,9 +1,10 @@
 use anyhow::{Context as _, Result};
 use futures::future::try_join_all;
 use image::{
-    ExtendedColorType, ImageEncoder as _,
+    ExtendedColorType, ImageEncoder as _, RgbaImage,
     codecs::png::{CompressionType, FilterType, PngEncoder},
 };
+use koharu_pipeline::Bounds;
 use koharu_psd::{PsdExportOptions, export_page};
 use koharu_rasterizer::{Raster, RasterOptions, Rasterizer};
 use koharu_renderer::{Frame, Renderer};
@@ -199,25 +200,75 @@ pub(crate) async fn get_thumbnail(
     Ok(ThumbnailBytes(bytes))
 }
 
+/// A rendered page, or part of one, prepared for a vision model.
+pub(crate) struct Preview {
+    pub(crate) webp: Vec<u8>,
+    /// Page-space `[x, y, width, height]` shown by the image.
+    pub(crate) area: [u32; 4],
+    /// Image pixels per page pixel.
+    pub(crate) scale: f64,
+}
+
+/// Longest edge of a whole-page preview.
+const PAGE_PREVIEW_EDGE: u32 = 1024;
+/// Longest edge of a region preview; smaller regions keep full resolution.
+const REGION_PREVIEW_EDGE: u32 = 1536;
+
 pub(crate) async fn rendered_preview(
     renderer: &Renderer,
     rasterizer: Arc<Rasterizer>,
     snapshot: &Snapshot,
     page: EntityId,
-) -> Result<Vec<u8>> {
+    region: Option<Bounds>,
+) -> Result<Preview> {
     snapshot.page(page)?;
     let frame = renderer.render(snapshot, page).await?;
     let image = rasterize(rasterizer, &frame, RasterOptions::default())
         .await?
         .image;
-    tokio_rayon::spawn(move || {
-        let image = image::DynamicImage::ImageRgba8(image)
-            .resize(1024, 1024, image::imageops::FilterType::Lanczos3)
+    tokio_rayon::spawn(move || preview(&image, region)).await
+}
+
+fn preview(image: &RgbaImage, region: Option<Bounds>) -> Result<Preview> {
+    let (area, limit) = match region {
+        Some(region) => (crop_area(image.dimensions(), region)?, REGION_PREVIEW_EDGE),
+        None => ([0, 0, image.width(), image.height()], PAGE_PREVIEW_EDGE),
+    };
+    let [x, y, width, height] = area;
+    let mut view = image::imageops::crop_imm(image, x, y, width, height).to_image();
+    if width.max(height) > limit {
+        view = image::DynamicImage::ImageRgba8(view)
+            .resize(limit, limit, image::imageops::FilterType::Lanczos3)
             .to_rgba8();
-        let encoder = webp::Encoder::from_rgba(image.as_raw(), image.width(), image.height());
-        Ok::<_, anyhow::Error>(encoder.encode(85.0).to_vec())
+    }
+    let encoder = webp::Encoder::from_rgba(view.as_raw(), view.width(), view.height());
+    Ok(Preview {
+        webp: encoder.encode(85.0).to_vec(),
+        area,
+        scale: f64::from(view.width()) / f64::from(width),
     })
-    .await
+}
+
+/// Whole pixels of `region` that lie on an image of `size`.
+fn crop_area((image_width, image_height): (u32, u32), region: Bounds) -> Result<[u32; 4]> {
+    if ![region.x, region.y, region.width, region.height]
+        .into_iter()
+        .all(f64::is_finite)
+        || region.width <= 0.0
+        || region.height <= 0.0
+    {
+        anyhow::bail!("the region must be finite and non-empty");
+    }
+    let left = region.x.max(0.0).floor();
+    let top = region.y.max(0.0).floor();
+    let right = (region.x + region.width).min(f64::from(image_width)).ceil();
+    let bottom = (region.y + region.height)
+        .min(f64::from(image_height))
+        .ceil();
+    if right <= left || bottom <= top {
+        anyhow::bail!("the region lies outside the page");
+    }
+    Ok([left, top, right - left, bottom - top].map(|value| value as u32))
 }
 
 async fn rasterize(
@@ -229,4 +280,48 @@ async fn rasterize(
     tokio_rayon::spawn(move || rasterizer.rasterize(&frame, options))
         .await
         .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bounds(x: f64, y: f64, width: f64, height: f64) -> Bounds {
+        Bounds {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn whole_pages_are_scaled_to_the_preview_edge() {
+        let preview = preview(&RgbaImage::new(2048, 3072), None).unwrap();
+
+        assert_eq!(preview.area, [0, 0, 2048, 3072]);
+        assert!((preview.scale - 1024.0 / 3072.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn regions_keep_full_resolution_and_map_back_to_the_page() {
+        let image = RgbaImage::new(2048, 3072);
+
+        let region = preview(&image, Some(bounds(100.4, 200.0, 499.2, 300.0))).unwrap();
+        assert_eq!(region.area, [100, 200, 500, 300]);
+        assert_eq!(region.scale, 1.0);
+
+        let clamped = preview(&image, Some(bounds(-50.0, 3000.0, 200.0, 500.0))).unwrap();
+        assert_eq!(clamped.area, [0, 3000, 150, 72]);
+
+        let large = preview(&image, Some(bounds(0.0, 0.0, 2048.0, 1024.0))).unwrap();
+        assert!((large.scale - 1536.0 / 2048.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn regions_off_the_page_are_rejected() {
+        assert!(crop_area((100, 100), bounds(150.0, 0.0, 10.0, 10.0)).is_err());
+        assert!(crop_area((100, 100), bounds(0.0, 0.0, 0.0, 10.0)).is_err());
+        assert!(crop_area((100, 100), bounds(f64::NAN, 0.0, 10.0, 10.0)).is_err());
+    }
 }
