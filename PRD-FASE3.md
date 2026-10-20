@@ -3,6 +3,7 @@
 Dokumen kebutuhan produk untuk Fase 3 fork pribadi `Jeanjinmo/koharu-exp`. Dibaca bersama `EXP-PLAN.md` (aturan, lingkungan, hasil audit). **Baca keduanya seluruhnya sebelum mengubah kode.**
 
 - Status: **disetujui pemilik, siap dikerjakan per gelombang** (lihat §4).
+- Keputusan pemilik (2026-10-20): setelah 3A, gelombang 3B–3E dikerjakan **berturut-turut tanpa menunggu uji pemilik per gelombang**. Pemilik menguji semuanya sekaligus di akhir memakai manual uji yang diserahkan sesi pengerja, dan mencatat bug yang ditemukan. Aturan lain tetap berlaku.
 - Branch kerja: `feat/custom` (dari `feat/agent-mcp` @ `4ff6409d`). `feat/agent-mcp` dibekukan sebagai basis Fase 1.
 - Basis kode tetap tag `0.83.5`.
 
@@ -48,7 +49,7 @@ Prioritas (dampak pada pemakaian harian):
 
 ## 4. Gelombang pengerjaan
 
-Satu gelombang = satu cloud session (boleh dilanjutkan bila belum selesai). Gelombang berikutnya baru dimulai setelah pemilik menyatakan gelombang sebelumnya lolos uji.
+Satu gelombang = satu cloud session (boleh dilanjutkan bila belum selesai). Semula gelombang berikutnya baru dimulai setelah pemilik menyatakan gelombang sebelumnya lolos uji; sejak keputusan pemilik 2026-10-20, 3B–3E dikerjakan berurutan tanpa menunggu uji. Setiap gelombang tetap selesai hanya bila verifikasi cloud (§5.4) bersih dan build Windows di Actions hijau.
 
 | Gelombang | Isi | Bergantung pada |
 |---|---|---|
@@ -280,6 +281,7 @@ Persiapan setiap gelombang: unduh artifact `koharu-windows-latest` dari Actions,
 3. Sesi cloud: baca `EXP-PLAN.md` + PRD, kerjakan per fitur, verifikasi §5.4, push ke `feat/custom`, pastikan build Windows hijau, lalu laporkan ringkasan: fitur selesai, yang tertunda, jawaban pertanyaan terbuka, hal yang perlu diuji pemilik.
 4. Sesi lokal menarik hasilnya (`git pull`), memeriksa kode terhadap PRD, dan menyusun rangkuman untuk pemilik.
 5. Pemilik menguji exe dari artifact Actions dengan checklist §8; masalah diperbaiki di sesi cloud yang sama sebelum lanjut ke gelombang berikutnya.
+6. Sejak keputusan pemilik 2026-10-20: setelah 3E, sesi pengerja menyerahkan manual uji langsung (pengalaman nyata di PC Windows) yang merangkum checklist §8 semua gelombang. Pemilik menguji di akhir, mencatat bug, lalu perbaikannya dikerjakan di sesi berikutnya.
 
 Prompt awal cloud session:
 
