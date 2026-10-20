@@ -76,6 +76,7 @@ interface KoharuStore {
   processingStages: Stage[]
   settingsOpen: boolean
   cleanup: ProjectCleanup | null
+  referenceImport: boolean
   compare: Compare
   shortcuts: Shortcuts
   selectPages: (pages: EntityId[]) => void
@@ -84,6 +85,7 @@ interface KoharuStore {
   setProcessingStages: (stages: Stage[]) => void
   setSettingsOpen: (open: boolean) => void
   setCleanup: (cleanup: ProjectCleanup | null) => void
+  setReferenceImport: (open: boolean) => void
   setCompareOpen: (open: boolean) => void
   setCompareMode: (mode: CompareMode) => void
   setComparePeeking: (peeking: boolean) => void
@@ -154,6 +156,7 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   processingStages: [...pipelineStages],
   settingsOpen: false,
   cleanup: null,
+  referenceImport: false,
   compare: { open: false, mode: rememberedCompareMode(), peeking: false, split: 0.5 },
   shortcuts: defaultShortcuts,
   selectPages: (selectedPages) => set({ selectedPages: [...new Set(selectedPages)] }),
@@ -162,6 +165,7 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   setProcessingStages: (processingStages) => set({ processingStages }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setCleanup: (cleanup) => set({ cleanup }),
+  setReferenceImport: (referenceImport) => set({ referenceImport }),
   setCompareOpen: (open) =>
     set((state) => ({ compare: { ...state.compare, open, peeking: false } })),
   setCompareMode: (mode) => {

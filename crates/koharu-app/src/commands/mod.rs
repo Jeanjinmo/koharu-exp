@@ -10,6 +10,7 @@ pub(crate) mod output;
 pub(crate) mod preferences;
 pub(crate) mod processing;
 pub(crate) mod project;
+pub(crate) mod reference;
 
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -104,6 +105,11 @@ pub fn bindings() -> tauri_specta::Builder<tauri_runtime_cef::CefRuntime> {
             output::export,
             output::get_thumbnail,
             output::get_page_image,
+            reference::stage_references,
+            reference::get_staged_reference_thumbnail,
+            reference::discard_staged_references,
+            reference::attach_references,
+            reference::detach_references,
             fonts::get_fonts,
             fonts::get_font_preview,
             preferences::save_preferences,

@@ -16,6 +16,7 @@ function page(id: string, label: string, status: PageStatus): PageSummary {
     source_asset: null,
     layer_count: 0,
     status,
+    reference: null,
   }
 }
 

@@ -23,11 +23,11 @@ use tauri_runtime_cef::CefRuntime;
 use super::{Error, project::CurrentProject};
 use koharu_desktop::Desktop;
 
-const THUMBNAIL_EDGE: u32 = 128;
+pub(super) const THUMBNAIL_EDGE: u32 = 128;
 
 #[derive(Type)]
 #[specta(transparent)]
-pub(crate) struct ThumbnailBytes(#[specta(type = Vec<u8>)] Vec<u8>);
+pub(crate) struct ThumbnailBytes(#[specta(type = Vec<u8>)] pub(super) Vec<u8>);
 
 impl IpcResponse for ThumbnailBytes {
     fn body(self) -> tauri::Result<tauri::ipc::InvokeResponseBody> {

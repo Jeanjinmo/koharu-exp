@@ -146,6 +146,7 @@ describe('canvas interaction adapter', () => {
         source_asset: null,
         layer_count: 1,
         status: 'not_started',
+        reference: null,
       },
       {
         id: 'next',
@@ -154,6 +155,7 @@ describe('canvas interaction adapter', () => {
         source_asset: null,
         layer_count: 1,
         status: 'not_started',
+        reference: null,
       },
     ])
     useKoharuStore.setState({ canvasPage: 'previous' })

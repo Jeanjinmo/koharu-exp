@@ -6,8 +6,9 @@
 
 use crate::{
     BubbleRegion, DetectionAnalysis, EntityId, EntityOrigin, Error, Geometry, Group, OcrAnalysis,
-    Page, PageStatus, Project, RasterLayer, Region, RegionSpec, Relation, Result, SourceText,
-    TextContent, TextGroup, TextLayout, TextRegion, TextRole, Translation, Typography, Visibility,
+    Page, PageReference, PageStatus, Project, RasterLayer, Region, RegionSpec, Relation, Result,
+    SourceText, TextContent, TextGroup, TextLayout, TextRegion, TextRole, Translation, Typography,
+    Visibility,
     component::{Component, ComponentRecord, ValidationContext, decode, key},
     components::Assets,
     state::{Components, State},
@@ -61,6 +62,7 @@ component_schema! {
     ASSETS = 16 => Assets,
     ENTITY_ORIGIN = 17 => EntityOrigin,
     PAGE_STATUS = 18 => PageStatus,
+    PAGE_REFERENCE = 19 => PageReference,
 }
 
 pub(crate) fn validate_components(
@@ -106,6 +108,10 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
     if has(PAGE_STATUS) && !has(PAGE) {
         Err(Error::invalid(format!(
             "entity {id} has a page status but is not a page"
+        )))
+    } else if has(PAGE_REFERENCE) && !has(PAGE) {
+        Err(Error::invalid(format!(
+            "entity {id} has a reference but is not a page"
         )))
     } else if (has_source || has_translation || has(TEXT_ROLE)) && !has_content {
         Err(Error::invalid(format!(

@@ -1,7 +1,15 @@
 'use client'
 
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { FilePlus2, FolderOpen, HardDrive, LoaderCircle, Settings, Trash2 } from 'lucide-react'
+import {
+  BookImage,
+  FilePlus2,
+  FolderOpen,
+  HardDrive,
+  LoaderCircle,
+  Settings,
+  Trash2,
+} from 'lucide-react'
 import Image from 'next/image'
 import { useState, type ComponentProps } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -51,6 +59,7 @@ export function TitleBar() {
   const selectLayers = useKoharuStore((state) => state.selectLayers)
   const setSettingsOpen = useKoharuStore((state) => state.setSettingsOpen)
   const setCleanup = useKoharuStore((state) => state.setCleanup)
+  const setReferenceImport = useKoharuStore((state) => state.setReferenceImport)
   const compareOpen = useKoharuStore((state) => state.compare.open)
   const setCompareOpen = useKoharuStore((state) => state.setCompareOpen)
   const compareShortcut = useKoharuStore((state) => state.shortcuts.compare)
@@ -112,6 +121,13 @@ export function TitleBar() {
                   </MenubarItem>
                 </MenubarSubContent>
               </MenubarSub>
+              <MenubarItem
+                disabled={!project || pages.length === 0}
+                onClick={() => setReferenceImport(true)}
+              >
+                <BookImage />
+                {t('references.import')}
+              </MenubarItem>
               <MenubarSub>
                 <MenubarSubTrigger
                   disabled={!project || pages.length === 0 || exporting}

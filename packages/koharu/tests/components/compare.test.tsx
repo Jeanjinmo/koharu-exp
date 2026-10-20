@@ -52,6 +52,7 @@ beforeEach(() => {
       source_asset: 'source-blob',
       layer_count: 1,
       status: 'not_started',
+      reference: null,
     },
   ])
   queryClient.setQueryData(pageKey, {

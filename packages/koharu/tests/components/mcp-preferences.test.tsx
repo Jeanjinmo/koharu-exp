@@ -173,6 +173,7 @@ describe('MCP tools settings', () => {
         source_asset: null,
         layer_count: 0,
         status: 'not_started',
+        reference: null,
       },
       {
         id: 'page-2',
@@ -181,6 +182,7 @@ describe('MCP tools settings', () => {
         source_asset: null,
         layer_count: 0,
         status: 'not_started',
+        reference: null,
       },
     ])
     useKoharuStore.setState({

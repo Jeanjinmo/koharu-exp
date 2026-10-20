@@ -25,6 +25,7 @@ function open(cleanup: 'clear' | 'free-space') {
       source_asset: null,
       layer_count: 0,
       status: 'not_started',
+      reference: null,
     })),
   )
   useKoharuStore.setState({ cleanup })

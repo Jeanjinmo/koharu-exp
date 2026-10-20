@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual'
 import {
+  BookImage,
   FilePlus2,
   FolderOpen,
   HardDrive,
@@ -87,6 +88,7 @@ export function PageRail() {
   const selectLayers = useKoharuStore((state) => state.selectLayers)
   const setSettingsOpen = useKoharuStore((state) => state.setSettingsOpen)
   const setCleanup = useKoharuStore((state) => state.setCleanup)
+  const setReferenceImport = useKoharuStore((state) => state.setReferenceImport)
   const { importPages, importing } = useImportPages()
   const anchor = useRef<number | null>(null)
   const selectionRequest = useRef(0)
@@ -235,6 +237,20 @@ export function PageRail() {
       .then(() => refresh(projectKey, pagesKey))
       .catch(() => undefined)
 
+  // Removing the reference of one of several selected pages removes it from
+  // every selected page that has one.
+  const removeReference = (page: string) => {
+    const targets =
+      selected.length > 1 && selected.includes(page)
+        ? pages
+            .filter((item) => item.reference && selected.includes(item.id))
+            .map((item) => item.id)
+        : [page]
+    void call(commands.detachReferences, targets)
+      .then(() => refresh(projectKey, pagesKey))
+      .catch(() => undefined)
+  }
+
   const openRename = (page: PageSummary) => {
     setRenaming(page)
     setRenameValue(page.label)
@@ -293,6 +309,13 @@ export function PageRail() {
               <MoreHorizontal />
             </DropdownMenuTrigger>
             <DropdownMenuContent align='end'>
+              <DropdownMenuItem
+                disabled={pages.length === 0}
+                onClick={() => setReferenceImport(true)}
+              >
+                <BookImage /> {t('references.import')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setCleanup('free-space')}>
                 <HardDrive /> {t('cleanup.freeSpace')}
               </DropdownMenuItem>
@@ -366,6 +389,7 @@ export function PageRail() {
                       onDragEnd={() => setDragged(null)}
                       onRename={() => openRename(page)}
                       onStatus={(status) => setStatus(page.id, status)}
+                      onRemoveReference={() => removeReference(page.id)}
                       onDelete={() => deletePage(page.id)}
                       onDrop={() => {
                         if (dragged && dragged !== page.id) {
@@ -510,6 +534,7 @@ function PageItem({
   onDragEnd,
   onRename,
   onStatus,
+  onRemoveReference,
   onDelete,
   onDrop,
 }: {
@@ -523,6 +548,7 @@ function PageItem({
   onDragEnd: () => void
   onRename: () => void
   onStatus: (status: PageStatus) => void
+  onRemoveReference: () => void
   onDelete: () => void
   onDrop: () => void
 }) {
@@ -596,6 +622,14 @@ function PageItem({
                   ))}
                 </DropdownMenuRadioGroup>
               </DropdownMenuGroup>
+              {page.reference && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={onRemoveReference}>
+                    <BookImage /> {t('references.remove')}
+                  </DropdownMenuItem>
+                </>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem variant='destructive' onClick={onDelete}>
                 <Trash2 /> {t('navigator.delete')}
@@ -603,13 +637,25 @@ function PageItem({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        {page.status !== 'not_started' && (
-          <span
-            data-status={page.status}
-            className='mt-1 inline-flex h-4 items-center rounded-full px-1.5 text-[9px] font-medium data-[status=done]:bg-emerald-500/15 data-[status=done]:text-emerald-700 data-[status=needs_review]:bg-amber-500/15 data-[status=needs_review]:text-amber-700 data-[status=translated_by_agent]:bg-sky-500/15 data-[status=translated_by_agent]:text-sky-700 dark:data-[status=done]:text-emerald-300 dark:data-[status=needs_review]:text-amber-300 dark:data-[status=translated_by_agent]:text-sky-300'
-          >
-            {t(`navigator.statuses.${page.status}`)}
-          </span>
+        {(page.status !== 'not_started' || page.reference) && (
+          <div className='mt-1 flex flex-wrap gap-1'>
+            {page.status !== 'not_started' && (
+              <span
+                data-status={page.status}
+                className='inline-flex h-4 items-center rounded-full px-1.5 text-[9px] font-medium data-[status=done]:bg-emerald-500/15 data-[status=done]:text-emerald-700 data-[status=needs_review]:bg-amber-500/15 data-[status=needs_review]:text-amber-700 data-[status=translated_by_agent]:bg-sky-500/15 data-[status=translated_by_agent]:text-sky-700 dark:data-[status=done]:text-emerald-300 dark:data-[status=needs_review]:text-amber-300 dark:data-[status=translated_by_agent]:text-sky-300'
+              >
+                {t(`navigator.statuses.${page.status}`)}
+              </span>
+            )}
+            {page.reference && (
+              <span
+                title={t('references.badgeHint', { language: page.reference.language })}
+                className='inline-flex h-4 items-center rounded-full bg-violet-500/15 px-1.5 text-[9px] font-medium text-violet-700 dark:text-violet-300'
+              >
+                {t('references.badge')}
+              </span>
+            )}
+          </div>
         )}
         <p className='mt-1 text-[9px] leading-3.5 text-muted-foreground'>
           {t('navigator.layerCount', { count: page.layer_count })}
@@ -622,7 +668,15 @@ function PageItem({
   )
 }
 
-function PageThumbnail({ page, asset, label }: { page: string; asset: string; label: string }) {
+export function PageThumbnail({
+  page,
+  asset,
+  label,
+}: {
+  page: string
+  asset: string
+  label: string
+}) {
   const { t } = useTranslation()
   const [source, setSource] = useState<string | null>(null)
   const [settled, setSettled] = useState(false)

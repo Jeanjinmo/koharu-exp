@@ -128,8 +128,9 @@ async fn built_in_component_schema_revisions_are_explicit() {
             schema::<crate::components::Assets>(),
             schema::<Relation>(),
             schema::<PageStatus>(),
+            schema::<PageReference>(),
         ],
-        [1; 19]
+        [1; 20]
     );
     assert_eq!(schema::<TextLayout>(), 2);
 }
@@ -158,6 +159,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             OcrAnalysis::KIND,
             crate::components::Assets::KIND,
             PageStatus::KIND,
+            PageReference::KIND,
         ],
         [
             "dev.koharu.project",
@@ -180,6 +182,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             "dev.koharu.analysis.ocr",
             "dev.koharu.assets",
             "dev.koharu-exp.page.status",
+            "dev.koharu-exp.page.reference",
         ]
     );
 }
@@ -214,6 +217,48 @@ async fn page_status_lives_on_pages_and_survives_reopening() {
         Some(PageStatus::NeedsReview)
     );
     assert_eq!(reopened.component::<PageStatus>(untouched).unwrap(), None);
+}
+
+#[tokio::test]
+async fn page_references_live_on_pages_with_a_valid_placement() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("reference.khrproj");
+    let reference = PageReference {
+        language: LanguageTag::new("en-US").unwrap(),
+        placement: ReferencePlacement {
+            x: -0.02,
+            y: 0.01,
+            width: 1.05,
+            height: 0.98,
+        },
+    };
+    let referenced = {
+        let mut session = Session::create(&path).await.unwrap();
+        let mut edit = session.snapshot().edit();
+        let referenced = edit.add_page(page(), At::End).unwrap();
+        edit.set(referenced, &reference).unwrap();
+        let snapshot = session
+            .commit(edit.finish().unwrap())
+            .await
+            .unwrap()
+            .snapshot;
+
+        let mut edit = snapshot.edit();
+        let content = edit.add_text_content(referenced, At::End).unwrap();
+        edit.set(content, &reference).unwrap();
+        assert!(edit.finish().is_err());
+
+        let mut collapsed = reference.clone();
+        collapsed.placement.width = 0.0;
+        assert!(snapshot.edit().set(referenced, &collapsed).is_err());
+        referenced
+    };
+
+    let reopened = Session::open(&path).await.unwrap().snapshot();
+    assert_eq!(
+        reopened.component::<PageReference>(referenced).unwrap(),
+        Some(reference)
+    );
 }
 
 #[tokio::test]

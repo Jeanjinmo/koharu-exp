@@ -5,9 +5,9 @@ use image::{DynamicImage, GrayImage, ImageFormat, RgbaImage};
 use koharu_desktop::Frame;
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, Authored, Commit, EntityId, EntityOrigin,
-    Geometry as SceneGeometry, Group as SceneGroup, LanguageTag, Origin, PageDraft, PageStatus,
-    Point as ScenePoint, Presents, RasterLayer as SceneRasterLayer, RasterLayerKind,
-    Region as SceneRegion, RemovePolicy, Revision, Session, Snapshot,
+    Geometry as SceneGeometry, Group as SceneGroup, LanguageTag, Origin, PageDraft, PageReference,
+    PageStatus, Point as ScenePoint, Presents, RasterLayer as SceneRasterLayer, RasterLayerKind,
+    ReferencePlacement, Region as SceneRegion, RemovePolicy, Revision, Session, Snapshot,
     SourceText as SceneSourceText, TextGroup as SceneTextGroup, TextLayout as SceneTextLayout,
     TextLayoutKind, Translation as SceneTranslation, Typography as SceneTypography,
     Visibility as SceneVisibility,
@@ -63,6 +63,16 @@ pub struct PageSummary {
     #[specta(type = f64)]
     pub layer_count: usize,
     pub status: PageStatus,
+    pub reference: Option<PageReferenceSummary>,
+}
+
+/// The translated edition attached to a page.
+#[derive(Clone, Debug, Serialize, Type)]
+pub struct PageReferenceSummary {
+    /// Changes whenever the reference image does.
+    pub asset: String,
+    pub language: String,
+    pub placement: ReferencePlacement,
 }
 
 #[derive(Clone, Debug, Serialize, Type)]
@@ -358,9 +368,23 @@ impl Project {
                     status: snapshot
                         .component::<PageStatus>(page.id())?
                         .unwrap_or_default(),
+                    reference: Self::reference(snapshot, page.id())?,
                 })
             })
             .collect()
+    }
+
+    fn reference(snapshot: &Snapshot, page: EntityId) -> Result<Option<PageReferenceSummary>> {
+        let Some(reference) = snapshot.component::<PageReference>(page)? else {
+            return Ok(None);
+        };
+        let asset = Self::asset_id(snapshot, page, PageReference::ASSET_ROLE)?
+            .with_context(|| format!("page {page} has a reference without an image"))?;
+        Ok(Some(PageReferenceSummary {
+            asset,
+            language: reference.language.to_string(),
+            placement: reference.placement,
+        }))
     }
 
     pub(crate) async fn rename_page(&mut self, page: EntityId, label: String) -> Result<Commit> {
@@ -391,6 +415,59 @@ impl Project {
                     PageStatus::NotStarted => edit.remove::<PageStatus>(page)?,
                     status => edit.set(page, &status)?,
                 }
+            }
+            Ok(())
+        })?;
+        self.commit(patch).await
+    }
+
+    /// Attaches reference images to pages in one commit, stretched over the
+    /// page. A page that already has a reference gets the new one.
+    pub(crate) async fn attach_references(
+        &mut self,
+        references: Vec<(EntityId, AssetInput)>,
+        language: LanguageTag,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        let mut pages = HashSet::new();
+        for (page, _) in &references {
+            snapshot
+                .page(*page)
+                .with_context(|| format!("{page} is not a page"))?;
+            if !pages.insert(*page) {
+                bail!("page {page} is paired with more than one reference");
+            }
+        }
+        let role = AssetRole::new(PageReference::ASSET_ROLE)?;
+        let patch = snapshot.patch(|edit| {
+            for (page, image) in references {
+                edit.set_asset(page, &role, image)?;
+                edit.set(
+                    page,
+                    &PageReference {
+                        language: language.clone(),
+                        placement: ReferencePlacement::FILL,
+                    },
+                )?;
+            }
+            Ok(())
+        })?;
+        self.commit(patch).await
+    }
+
+    /// Removes the references of `pages` in one commit.
+    pub(crate) async fn detach_references(&mut self, pages: Vec<EntityId>) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        for page in &pages {
+            snapshot
+                .page(*page)
+                .with_context(|| format!("{page} is not a page"))?;
+        }
+        let role = AssetRole::new(PageReference::ASSET_ROLE)?;
+        let patch = snapshot.patch(|edit| {
+            for page in pages {
+                edit.remove_asset(page, &role)?;
+                edit.remove::<PageReference>(page)?;
             }
             Ok(())
         })?;
@@ -1613,6 +1690,59 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn references_attach_in_one_step_replace_earlier_ones_and_detach() {
+        let (mut project, page, _) = project_with_text(0).await;
+        let image = |bytes: &'static [u8]| {
+            AssetInput::new(
+                bytes,
+                "image/jpeg",
+                AssetMetadata {
+                    width: Some(800),
+                    height: Some(1200),
+                    attributes: Default::default(),
+                },
+            )
+        };
+        let english = LanguageTag::new("en-US").unwrap();
+        let reference = |project: &Project| {
+            Project::pages(&project.snapshot()).unwrap()[0]
+                .reference
+                .clone()
+        };
+
+        let commit = project
+            .attach_references(vec![(page, image(b"first"))], english.clone())
+            .await
+            .unwrap();
+        project.record_commit(&commit);
+        let first = reference(&project).unwrap();
+        assert_eq!(first.language, "en-US");
+        assert_eq!(first.placement, ReferencePlacement::FILL);
+        assert!(
+            Project::pages(&project.snapshot()).unwrap()[0]
+                .source_asset
+                .is_none()
+        );
+
+        project
+            .attach_references(vec![(page, image(b"second"))], english.clone())
+            .await
+            .unwrap();
+        assert_ne!(reference(&project).unwrap().asset, first.asset);
+        assert!(
+            project
+                .attach_references(vec![(page, image(b"one")), (page, image(b"two"))], english)
+                .await
+                .is_err()
+        );
+
+        project.detach_references(vec![page]).await.unwrap();
+        assert!(reference(&project).is_none());
+        let role = AssetRole::new(PageReference::ASSET_ROLE).unwrap();
+        assert!(project.snapshot().asset(page, &role).unwrap().is_none());
     }
 
     #[tokio::test]

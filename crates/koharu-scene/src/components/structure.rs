@@ -84,6 +84,64 @@ impl Component for PageStatus {
     const KIND: &'static str = "dev.koharu-exp.page.status";
 }
 
+/// A translated edition of a page, kept to guide its translation. The image
+/// is the page's `reference` asset, which is never rendered or exported.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+pub struct PageReference {
+    /// The language the reference is lettered in.
+    pub language: LanguageTag,
+    pub placement: ReferencePlacement,
+}
+
+impl PageReference {
+    /// The page asset role that holds the reference image.
+    pub const ASSET_ROLE: &'static str = "reference";
+}
+
+impl Component for PageReference {
+    const KIND: &'static str = "dev.koharu-exp.page.reference";
+
+    fn validate(&self, _context: &ValidationContext<'_>) -> Result<()> {
+        self.language.validate()?;
+        self.placement.validate()
+    }
+}
+
+/// Where a reference image lies over its page, in fractions of the page
+/// width and height, so one placement fits pages of slightly different sizes.
+#[revisioned(revision = 1)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Type)]
+pub struct ReferencePlacement {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl ReferencePlacement {
+    /// Stretches the reference over the whole page.
+    pub const FILL: Self = Self {
+        x: 0.0,
+        y: 0.0,
+        width: 1.0,
+        height: 1.0,
+    };
+
+    fn validate(&self) -> Result<()> {
+        let valid = [self.x, self.y, self.width, self.height]
+            .iter()
+            .all(|value| value.is_finite() && value.abs() <= 100.0)
+            && self.width > 0.0
+            && self.height > 0.0;
+        if valid {
+            Ok(())
+        } else {
+            Err(Error::invalid("reference placement is invalid"))
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PageDraft {
     pub label: String,

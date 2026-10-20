@@ -88,6 +88,19 @@ export const commands = {
 	 *  editable canvas.
 	 */
 	getPageImage: (page: EntityId, image: PageImage) => __TAURI_INVOKE<ImageBytes>("get_page_image", { page, image }),
+	/**
+	 *  Reads reference images and keeps them until they are attached or
+	 *  discarded. `None` means the file dialog was dismissed.
+	 */
+	stageReferences: (source: PageImportSource, trimMargins: boolean) => __TAURI_INVOKE<ReferenceCandidate[] | null>("stage_references", { source, trimMargins }),
+	getStagedReferenceThumbnail: (reference: number) => __TAURI_INVOKE<ThumbnailBytes>("get_staged_reference_thumbnail", { reference }),
+	discardStagedReferences: () => __TAURI_INVOKE<null>("discard_staged_references"),
+	/**
+	 *  Attaches staged references to pages in one undoable step, then discards
+	 *  the staged images.
+	 */
+	attachReferences: (pairs: ReferencePair[], language: string) => __TAURI_INVOKE<null>("attach_references", { pairs, language }),
+	detachReferences: (pages: EntityId[]) => __TAURI_INVOKE<null>("detach_references", { pages }),
 	getFonts: () => __TAURI_INVOKE<FontFamily[]>("get_fonts"),
 	getFontPreview: (familyName: string) => __TAURI_INVOKE<FontPreviewBytes>("get_font_preview", { familyName }),
 	savePreferences: (pipeline: PipelineConfig, providers: ProviderPreferences, typesetting: TypesettingConfig) => __TAURI_INVOKE<Preferences>("save_preferences", { pipeline: ({...pipeline,translation:({...pipeline.translation,generation:({...pipeline.translation.generation,temperature:pipeline.translation.generation.temperature==null?pipeline.translation.generation.temperature:pipeline.translation.generation.temperature,top_p:pipeline.translation.generation.top_p==null?pipeline.translation.generation.top_p:pipeline.translation.generation.top_p,min_p:pipeline.translation.generation.min_p==null?pipeline.translation.generation.min_p:pipeline.translation.generation.min_p,repeat_penalty:pipeline.translation.generation.repeat_penalty==null?pipeline.translation.generation.repeat_penalty:pipeline.translation.generation.repeat_penalty,frequency_penalty:pipeline.translation.generation.frequency_penalty==null?pipeline.translation.generation.frequency_penalty:pipeline.translation.generation.frequency_penalty,presence_penalty:pipeline.translation.generation.presence_penalty==null?pipeline.translation.generation.presence_penalty:pipeline.translation.generation.presence_penalty})}),processor:({...pipeline.processor,"koharu-layout-rfdetr-seg-2xl":pipeline.processor["koharu-layout-rfdetr-seg-2xl"]==null?pipeline.processor["koharu-layout-rfdetr-seg-2xl"]:({...pipeline.processor["koharu-layout-rfdetr-seg-2xl"],text_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold==null?pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold,bubble_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold==null?pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold,panel_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold==null?pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold})})}), providers, typesetting }).then((v) => (({...v,pipeline:({...v.pipeline,translation:({...v.pipeline.translation,generation:({...v.pipeline.translation.generation,temperature:v.pipeline.translation.generation.temperature==null?v.pipeline.translation.generation.temperature:v.pipeline.translation.generation.temperature,top_p:v.pipeline.translation.generation.top_p==null?v.pipeline.translation.generation.top_p:v.pipeline.translation.generation.top_p,min_p:v.pipeline.translation.generation.min_p==null?v.pipeline.translation.generation.min_p:v.pipeline.translation.generation.min_p,repeat_penalty:v.pipeline.translation.generation.repeat_penalty==null?v.pipeline.translation.generation.repeat_penalty:v.pipeline.translation.generation.repeat_penalty,frequency_penalty:v.pipeline.translation.generation.frequency_penalty==null?v.pipeline.translation.generation.frequency_penalty:v.pipeline.translation.generation.frequency_penalty,presence_penalty:v.pipeline.translation.generation.presence_penalty==null?v.pipeline.translation.generation.presence_penalty:v.pipeline.translation.generation.presence_penalty})}),processor:({...v.pipeline.processor,"koharu-layout-rfdetr-seg-2xl":v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"]==null?v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"]:({...v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"],text_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold==null?v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold,bubble_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold==null?v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold,panel_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold==null?v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold})})})}) as typeof v)),
@@ -449,6 +462,14 @@ export type PageImage =
 
 export type PageImportSource = "files" | "folder";
 
+/**  The translated edition attached to a page. */
+export type PageReferenceSummary = {
+	/**  Changes whenever the reference image does. */
+	asset: string,
+	language: string,
+	placement: ReferencePlacement,
+};
+
 export type PageSelection = {
 	project: ProjectInfo,
 	page: Page,
@@ -473,6 +494,7 @@ export type PageSummary = {
 	source_asset: string | null,
 	layer_count: number,
 	status: PageStatus,
+	reference: PageReferenceSummary | null,
 };
 
 export type PaintBrush = {
@@ -545,6 +567,29 @@ export type Quantization = {
 export type RasterLayerKind = "cleanup" | "paint";
 
 export type Reasoning = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+
+export type ReferenceCandidate = {
+	name: string,
+	width: number,
+	height: number,
+};
+
+export type ReferencePair = {
+	page: EntityId,
+	/**  The position of the reference among the staged images. */
+	reference: number,
+};
+
+/**
+ *  Where a reference image lies over its page, in fractions of the page
+ *  width and height, so one placement fits pages of slightly different sizes.
+ */
+export type ReferencePlacement = {
+	x: number,
+	y: number,
+	width: number,
+	height: number,
+};
 
 export type Revision = number;
 

@@ -14,7 +14,9 @@ use super::EncodedPage;
 // a time releases that working buffer before the next page is processed.
 const PDF_SCALE: f32 = 300.0 / 72.0;
 
-pub(super) fn render(path: &Path) -> Result<Vec<EncodedPage>> {
+/// Renders each page of the PDF at `path` and hands it to `visit` before the
+/// next page is rendered.
+pub(super) fn render(path: &Path, visit: &mut dyn FnMut(EncodedPage) -> Result<()>) -> Result<()> {
     let data = fs::read(path).with_context(|| format!("failed to read PDF {}", path.display()))?;
     let pdf = Pdf::new(data)
         .map_err(|error| anyhow::anyhow!("failed to parse PDF {}: {error:?}", path.display()))?;
@@ -40,29 +42,25 @@ pub(super) fn render(path: &Path) -> Result<Vec<EncodedPage>> {
     };
     let cache = RenderCache::new();
 
-    pages
-        .iter()
-        .enumerate()
-        .map(|(index, page)| {
-            let page_number = index + 1;
-            let bytes = render_page(page, &cache, &interpreter_settings, &render_settings)
-                .into_png()
-                .with_context(|| {
-                    format!(
-                        "failed to encode PDF page {page_number} of {} as PNG",
-                        path.display()
-                    )
-                })?;
-
-            Ok(EncodedPage {
-                name: format!(
-                    "{stem}-{page_number:0page_number_width$}.png",
-                    page_number_width = page_number_width
-                ),
-                bytes,
-            })
-        })
-        .collect()
+    for (index, page) in pages.iter().enumerate() {
+        let page_number = index + 1;
+        let bytes = render_page(page, &cache, &interpreter_settings, &render_settings)
+            .into_png()
+            .with_context(|| {
+                format!(
+                    "failed to encode PDF page {page_number} of {} as PNG",
+                    path.display()
+                )
+            })?;
+        visit(EncodedPage {
+            name: format!(
+                "{stem}-{page_number:0page_number_width$}.png",
+                page_number_width = page_number_width
+            ),
+            bytes,
+        })?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -121,7 +119,12 @@ mod tests {
             std::process::id()
         ));
         fs::write(&path, single_page_pdf()).expect("write PDF fixture");
-        let pages = render(&path).expect("render PDF");
+        let mut pages = Vec::new();
+        render(&path, &mut |page| {
+            pages.push(page);
+            Ok(())
+        })
+        .expect("render PDF");
         fs::remove_file(&path).expect("remove PDF fixture");
 
         assert_eq!(pages.len(), 1);
