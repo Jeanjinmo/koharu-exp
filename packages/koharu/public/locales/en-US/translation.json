@@ -391,6 +391,8 @@
       "exportFolder": "Export folder",
       "exportFolderDescription": "Where the export tool writes. Every export gets a new folder, and agents cannot choose another location.",
       "failed": "Failed",
+      "followAgent": "Follow agent",
+      "followAgentDescription": "Show each page an MCP agent changes. Koharu never brings its window to the front, so you can keep working in another app.",
       "groups": {
         "image": "Image",
         "output": "Output",

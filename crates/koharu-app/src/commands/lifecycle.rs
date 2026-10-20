@@ -1,6 +1,6 @@
 use anyhow::{Context as _, Result};
 use koharu_desktop::{CanvasState, Desktop};
-use koharu_scene::{AssetInput, AssetMetadata, AssetRole, At, PageDraft};
+use koharu_scene::{AssetInput, AssetMetadata, AssetRole, At, EntityId, PageDraft};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -465,6 +465,33 @@ pub(crate) async fn import(
     Ok(())
 }
 
+/// Shows `page` in the editor for an agent that changed it. Only the editor
+/// follows: the window is never shown, restored, or focused, so the owner can
+/// keep working in another application. Returns whether the page changed.
+pub(crate) async fn follow_page(handle: &AppHandle<CefRuntime>, page: EntityId) -> Result<bool> {
+    let (snapshot, info) = {
+        let current = handle.state::<CurrentProject>();
+        let mut current = current.project.lock().await;
+        let Some(project) = current.as_mut() else {
+            return Ok(false);
+        };
+        if project.active_page() == Some(page) {
+            return Ok(false);
+        }
+        project.select_page(page)?;
+        (project.snapshot(), project.info())
+    };
+    let desktop = handle.state::<Desktop>();
+    if desktop.show_page(&snapshot, Some(page)).await? {
+        handle
+            .state::<CanvasChannel>()
+            .channel
+            .publish(desktop.canvas_state());
+    }
+    handle.state::<ProjectChannel>().channel.publish(Some(info));
+    Ok(true)
+}
+
 #[tracing::instrument(
     target = "koharu_metrics",
     name = "page_selected",
@@ -475,7 +502,7 @@ pub(crate) async fn import(
 #[specta::specta]
 pub(crate) async fn select_page(
     desktop: State<'_, Desktop>,
-    page: koharu_scene::EntityId,
+    page: EntityId,
     project: State<'_, CurrentProject>,
     canvas_channel: State<'_, CanvasChannel>,
 ) -> std::result::Result<PageSelection, Error> {

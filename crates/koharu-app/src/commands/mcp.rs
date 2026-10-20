@@ -8,6 +8,7 @@ use koharu_agent::{
     Config, McpConfig, ToolMetadata, ToolProfile,
     mcp::{ServerStatus, Supervisor, ToolActivity},
 };
+use koharu_scene::EntityId;
 use parking_lot::Mutex;
 use serde::Serialize;
 use specta::Type;
@@ -15,7 +16,7 @@ use tauri::{AppHandle, Manager as _, State, WebviewWindow, ipc::Channel};
 use tauri_runtime_cef::CefRuntime;
 use tokio::sync::broadcast::error::RecvError;
 
-use super::{ChannelExt as _, Error, agent::KoharuHost};
+use super::{ChannelExt as _, Error, agent::KoharuHost, lifecycle};
 
 #[derive(Default)]
 pub(crate) struct McpState {
@@ -30,9 +31,17 @@ pub(crate) struct McpChannel {
 #[derive(Clone, Debug, Serialize, Type)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum McpEvent {
-    Status { status: ServerStatus },
-    Activity { activity: ToolActivity },
+    Status {
+        status: ServerStatus,
+    },
+    Activity {
+        activity: ToolActivity,
+    },
     ActivityCleared,
+    /// The editor now shows the page an agent changed.
+    Followed {
+        page: EntityId,
+    },
 }
 
 /// What the UI shows about the MCP server when it starts.
@@ -84,10 +93,16 @@ impl McpState {
         drop(tauri::async_runtime::spawn(async move {
             loop {
                 match activity.recv().await {
-                    Ok(activity) => handle
-                        .state::<McpChannel>()
-                        .channel
-                        .publish(McpEvent::Activity { activity }),
+                    Ok(activity) => {
+                        let followed = followed_page(&activity);
+                        handle
+                            .state::<McpChannel>()
+                            .channel
+                            .publish(McpEvent::Activity { activity });
+                        if let Some(page) = followed {
+                            follow(&handle, page).await;
+                        }
+                    }
                     Err(RecvError::Lagged(skipped)) => {
                         tracing::warn!(skipped, "the MCP activity log fell behind");
                     }
@@ -145,6 +160,30 @@ impl McpState {
     }
 }
 
+/// The page to show after a call, when following the agent is on and the
+/// call changed that page.
+fn followed_page(activity: &ToolActivity) -> Option<EntityId> {
+    let follow = Config::load()
+        .and_then(|config| Ok(config.read()?.mcp.follow_agent))
+        .unwrap_or(false);
+    if !follow || !activity.ok || !activity.changed {
+        return None;
+    }
+    serde_json::from_value(serde_json::Value::String(activity.page.clone()?)).ok()
+}
+
+async fn follow(handle: &AppHandle<CefRuntime>, page: EntityId) {
+    match lifecycle::follow_page(handle, page).await {
+        Ok(true) => handle
+            .state::<McpChannel>()
+            .channel
+            .publish(McpEvent::Followed { page }),
+        Ok(false) => {}
+        // The agent may have deleted or moved past the page since.
+        Err(error) => tracing::debug!("could not follow the agent to its page: {error:#}"),
+    }
+}
+
 fn set_export_dir(folder: Option<PathBuf>) -> Result<()> {
     let config = Config::load()?;
     let mut config = config.write()?;
@@ -183,6 +222,21 @@ pub(crate) async fn set_mcp_tools(
     state
         .supervisor()?
         .set_tools(profile, disabled_tools.into_iter().collect())?;
+    Ok(state.settings()?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_mcp_follow_agent(
+    follow: bool,
+    state: State<'_, McpState>,
+) -> std::result::Result<McpSettings, Error> {
+    {
+        let config = Config::load()?;
+        let mut config = config.write()?;
+        config.mcp.follow_agent = follow;
+        config.save()?;
+    }
     Ok(state.settings()?)
 }
 

@@ -24,6 +24,7 @@ export const commands = {
 	 *  profile without `disabled_tools`.
 	 */
 	setMcpTools: (profile: ToolProfile, disabledTools: string[]) => __TAURI_INVOKE<McpSettings>("set_mcp_tools", { profile, disabledTools }),
+	setMcpFollowAgent: (follow: boolean) => __TAURI_INVOKE<McpSettings>("set_mcp_follow_agent", { follow }),
 	chooseMcpExportFolder: () => __TAURI_INVOKE<McpSettings>("choose_mcp_export_folder"),
 	resetMcpExportFolder: () => __TAURI_INVOKE<McpSettings>("reset_mcp_export_folder"),
 	/**  Cancels the tool calls that a stopping server is still waiting for. */
@@ -342,11 +343,15 @@ export type McpConfig = {
 	profile: ToolProfile,
 	/**  Tools the custom profile turns off. */
 	disabled_tools: string[],
+	/**  Whether the editor shows each page an MCP tool call changes. */
+	follow_agent: boolean,
 	/**  Folder that receives agent exports; `None` uses `Documents/Koharu/exports`. */
 	export_dir: string | null,
 };
 
-export type McpEvent = { type: "status"; status: ServerStatus } | { type: "activity"; activity: ToolActivity } | { type: "activity_cleared" };
+export type McpEvent = { type: "status"; status: ServerStatus } | { type: "activity"; activity: ToolActivity } | { type: "activity_cleared" } | 
+/**  The editor now shows the page an agent changed. */
+{ type: "followed"; page: EntityId };
 
 /**  What the UI shows about the MCP server when it starts. */
 export type McpOverview = {

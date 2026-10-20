@@ -112,6 +112,13 @@ export function PageRail() {
     [],
   )
 
+  // Keep the active page in view when it changes without a click here, for
+  // example when the editor follows an agent.
+  const activeIndex = visiblePages.findIndex(({ page }) => page.id === active)
+  useEffect(() => {
+    if (activeIndex >= 0) pageVirtualizer.scrollToIndex(activeIndex, { align: 'auto' })
+  }, [activeIndex, pageVirtualizer])
+
   const select = (index: number, additive: boolean, range: boolean) => {
     const page = pages[index]
     if (!page) return

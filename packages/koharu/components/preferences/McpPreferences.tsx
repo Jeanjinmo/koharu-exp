@@ -99,6 +99,18 @@ export function McpPreferences() {
           </div>
         </PreferenceRow>
         <PreferenceRow
+          title={t('settings.mcp.followAgent')}
+          description={t('settings.mcp.followAgentDescription')}
+        >
+          <div className='flex h-8 items-center justify-end'>
+            <Switch
+              aria-label={t('settings.mcp.followAgent')}
+              checked={settings.config.follow_agent}
+              onCheckedChange={(follow) => apply(call(commands.setMcpFollowAgent, follow))}
+            />
+          </div>
+        </PreferenceRow>
+        <PreferenceRow
           title={t('settings.mcp.exportFolder')}
           description={t('settings.mcp.exportFolderDescription')}
         >

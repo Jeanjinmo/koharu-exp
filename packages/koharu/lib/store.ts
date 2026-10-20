@@ -166,6 +166,9 @@ export function receiveMcpEvent(event: McpEvent): void {
     case 'activity_cleared':
       useKoharuStore.setState({ mcpActivity: [] })
       break
+    case 'followed':
+      useKoharuStore.setState({ selectedPages: [event.page], selectedLayers: [] })
+      break
   }
 }
 

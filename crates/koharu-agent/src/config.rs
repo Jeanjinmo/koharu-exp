@@ -57,6 +57,8 @@ pub struct McpConfig {
     pub profile: ToolProfile,
     /// Tools the custom profile turns off.
     pub disabled_tools: BTreeSet<String>,
+    /// Whether the editor shows each page an MCP tool call changes.
+    pub follow_agent: bool,
     /// Folder that receives agent exports; `None` uses `Documents/Koharu/exports`.
     pub export_dir: Option<PathBuf>,
 }
@@ -108,6 +110,7 @@ impl Default for McpConfig {
             port: 47821,
             profile: ToolProfile::default(),
             disabled_tools: BTreeSet::new(),
+            follow_agent: true,
             export_dir: None,
         }
     }
@@ -125,6 +128,7 @@ mod tests {
         assert_eq!(defaults.port, 47821);
         assert_eq!(defaults.profile, ToolProfile::Vision);
         assert!(defaults.disabled_tools.is_empty());
+        assert!(defaults.follow_agent);
         assert_eq!(defaults.export_dir, None);
         let saved = toml::Value::try_from(Config::default()).unwrap();
         assert_eq!(saved.try_into::<Config>().unwrap(), Config::default());

@@ -68,6 +68,7 @@ pub fn bindings() -> tauri_specta::Builder<tauri_runtime_cef::CefRuntime> {
             mcp::get_mcp_settings,
             mcp::set_mcp_enabled,
             mcp::set_mcp_tools,
+            mcp::set_mcp_follow_agent,
             mcp::choose_mcp_export_folder,
             mcp::reset_mcp_export_folder,
             mcp::stop_mcp_now,

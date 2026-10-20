@@ -36,6 +36,7 @@ function settings(config: Partial<McpConfig> = {}): McpSettings {
       port: 47821,
       profile: 'vision',
       disabled_tools: [],
+      follow_agent: true,
       export_dir: null,
       ...config,
     },
@@ -53,7 +54,7 @@ function render(ui: ReactNode) {
 }
 
 describe('MCP tools settings', () => {
-  it('shows the live server status and switches the server off', async () => {
+  it('shows the live server status and switches the server and following off', async () => {
     useKoharuStore.setState({
       mcpStatus: { state: 'running', url: 'http://127.0.0.1:47821/mcp', clients: 2 },
     })
@@ -61,13 +62,19 @@ describe('MCP tools settings', () => {
     const setEnabled = vi
       .spyOn(commands, 'setMcpEnabled')
       .mockResolvedValue(settings({ enabled: false }))
+    const setFollow = vi
+      .spyOn(commands, 'setMcpFollowAgent')
+      .mockResolvedValue(settings({ follow_agent: false }))
     render(<McpPreferences />)
 
     expect(await screen.findByText('Running at 127.0.0.1:47821 · 2 clients')).toBeInTheDocument()
     expect(screen.getByText('/home/reader/Documents/Koharu/exports')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('switch', { name: 'MCP server' }))
-
     await waitFor(() => expect(setEnabled).toHaveBeenCalledWith(false))
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Follow agent' }))
+    await waitFor(() => expect(setFollow).toHaveBeenCalledWith(false))
+    expect(await screen.findByRole('switch', { name: 'Follow agent' })).not.toBeChecked()
   })
 
   it('locks the switch while stopping and can stop at once', async () => {

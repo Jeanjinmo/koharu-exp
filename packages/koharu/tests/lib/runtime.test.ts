@@ -209,6 +209,11 @@ describe('Tauri runtime', () => {
     ])
     act(() => mcpChannel.onmessage({ type: 'activity_cleared' }))
     expect(useKoharuStore.getState().mcpActivity).toEqual([])
+
+    useKoharuStore.setState({ selectedPages: ['first', 'second'], selectedLayers: ['layer'] })
+    act(() => mcpChannel.onmessage({ type: 'followed', page: 'third' }))
+    expect(useKoharuStore.getState().selectedPages).toEqual(['third'])
+    expect(useKoharuStore.getState().selectedLayers).toEqual([])
     dispose()
   })
 
