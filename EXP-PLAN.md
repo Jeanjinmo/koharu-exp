@@ -10,17 +10,18 @@ Pemilik fork ingin manga diterjemahkan oleh **SuperGrok lewat Grok Build** (agen
 
 Caranya: Koharu diberi **server MCP** yang membuka 14 tool agent yang sudah ada (`KoharuHost`). Grok Build (atau agent MCP lain) lalu bisa membaca teks OCR dan menulis terjemahan langsung ke project Koharu.
 
-- **Fase 1 (sekarang): server MCP.** Ini inti pekerjaan.
-- **Fase 2 (nanti, opsional): klien ACP**, supaya Grok Build bisa diajak ngobrol dari panel Agent di dalam Koharu. Jangan dikerjakan sebelum diminta.
+- **Fase 1 (selesai, branch `feat/agent-mcp`): server MCP.** Terverifikasi di PC pemilik; branch ini dibekukan sebagai basis.
+- **Fase 2: dilewati.** Jangan dikerjakan.
+- **Fase 3 (sekarang, branch `feat/custom`): kustomisasi pribadi.** Spesifikasi lengkap ada di **`PRD-FASE3.md`**; dikerjakan per gelombang (3A–3E).
 
-Fork ini untuk **pemakaian pribadi jangka panjang**.
+Fork ini untuk **pemakaian pribadi jangka panjang**. Kecocokan dengan Koharu resmi tidak dipertimbangkan.
 
 ---
 
 ## 2. Aturan wajib
 
 1. **Jangan pernah membuat Pull Request**, ke repo mana pun. Repo asli (`koharu-rs/koharu`) tidak boleh disentuh sama sekali.
-2. **Push hanya ke branch `feat/agent-mcp` di `origin` (`Jeanjinmo/koharu-exp`).** Jangan push tag (memicu `release.yml`). Jangan push ke `main`.
+2. **Push hanya ke branch `feat/custom` di `origin` (`Jeanjinmo/koharu-exp`).** Jangan push ke `feat/agent-mcp` (basis Fase 1, dibekukan) atau `main`. Jangan push tag (memicu `release.yml`).
 3. **Basis kode adalah tag `0.83.5`.** Jangan merge atau rebase ke `upstream/main`; versi itu harus cocok dengan model dan runtime (±11 GB) yang sudah terpasang di PC pemilik.
 4. Ikuti `AGENTS.md` di root repo, terutama:
    - tanpa backward compatibility atau alias; ubah semua konsumen dan hapus bentuk lama;
@@ -121,3 +122,9 @@ Fork ini untuk **pemakaian pribadi jangka panjang**.
 - `.exe` hasil Actions mungkin butuh file pendukung CEF (`libcef.dll`, dll.). Cek saat build pertama; kalau kurang, salin dari folder Koharu terpasang atau tambahkan ke artifact.
 - Tolak tawaran auto-update di build ini, karena updater mengarah ke rilis Koharu resmi dan akan menimpa versi eksperimen.
 - Backup `%USERPROFILE%\.koharu\config.toml` sebelum menjalankan build ini (dipakai bersama dengan Koharu terpasang). Tutup Koharu terpasang saat menguji.
+
+---
+
+## 8. Fase 3
+
+Spesifikasi, prioritas, gelombang, checklist uji, dan pertanyaan terbuka Fase 3 ada di **`PRD-FASE3.md`**. Bagian 4–6 dokumen ini adalah catatan Fase 1 dan tetap berguna sebagai peta kode.
