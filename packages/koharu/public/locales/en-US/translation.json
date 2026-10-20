@@ -380,6 +380,7 @@
     },
     "loading": "Loading preferences…",
     "mcp": {
+      "aboutTool": "About {{tool}}",
       "chooseFolder": "Choose…",
       "defaultFolder": "Use the default folder",
       "description": "Let external agents such as Claude Code, Grok Build, or Hermes work on the open project through Koharu's MCP server. These settings do not affect the built-in agent.",
@@ -393,6 +394,32 @@
         "pipeline": "Pipeline",
         "read": "Read",
         "text": "Text"
+      },
+      "labelInfo": {
+        "betterWithVision": "Works with any model, but results are better when the model can see images.",
+        "deletes": "Removes pages or elements. Undo restores them while Koharu stays open.",
+        "editsImage": "Changes page pixels by inpainting or painting, not only text.",
+        "needsVision": "The model must be able to see images to use this tool."
+      },
+      "labels": {
+        "betterWithVision": "better with vision",
+        "deletes": "deletes",
+        "editsImage": "edits image",
+        "needsVision": "needs vision"
+      },
+      "profile": "Profile",
+      "profileDescription": "Koharu cannot tell what your agent's model can do, so choose the profile that matches it. Changing a checkbox switches to Custom.",
+      "profileHints": {
+        "custom": "Only the checked tools are on.",
+        "read": "Only the tools that read the project are on.",
+        "text": "Tools that need to see images are off.",
+        "vision": "Every tool is on."
+      },
+      "profiles": {
+        "custom": "Custom",
+        "read": "Read-only",
+        "text": "Text-only model",
+        "vision": "Vision model"
       },
       "retry": "Retry",
       "server": "Server",
@@ -411,8 +438,52 @@
       },
       "stopNow": "Stop now",
       "title": "MCP Tools",
+      "toolInfo": {
+        "add_text_box": "Adds a paragraph text box to a page, for example for text that detection missed. Can be undone. Works without vision, but placement is better when the model can see the page.",
+        "delete_elements": "Removes text elements and everything inside them. Can be undone. No vision needed.",
+        "delete_pages": "Removes pages and everything on them. Undo restores them while Koharu stays open. No vision needed.",
+        "draw": "Fills one area of a page with a solid color, like the Draw brush, for example white over leftover text. Can be undone. Works without vision, but areas are more accurate when the model can see the page.",
+        "erase": "Makes one area of a paint or cleanup layer transparent, like the Eraser, for example to bring back a logo that was removed. Can be undone. Works without vision, but areas are more accurate when the model can see the page.",
+        "export": "Writes PNG, PSD, or CBZ files into a new folder inside the export folder above. Existing files are never replaced, and the project does not change. No vision needed.",
+        "inspect_page": "Reads one page compactly: its size, every text element with its box, source text, translation, and languages, and its paint and cleanup layers. Agents use it before editing a page. Read-only. No vision needed.",
+        "inspect_project": "Reads every page of the project as text, without images. Agents use it for an overview; it is large for long projects, so agents should prefer inspect_page. Read-only. No vision needed.",
+        "move_element": "Moves an element under another parent or to another place in the layer order. Can be undone. No vision needed.",
+        "move_page": "Moves a page to another position in the project. Can be undone. No vision needed.",
+        "remove": "Inpaints one area of a page, like the Remove brush, to clear original text. Only that area changes, and the result goes into the page's cleanup layer. Can be undone. Works without vision, but areas are more accurate when the model can see the page.",
+        "rename_page": "Changes a page's name in the page list. Can be undone. No vision needed.",
+        "run_pipeline": "Runs Koharu's processing pipeline (detection, OCR, translation, inpainting) on the project, some pages, some elements, or one area. Its edits can be undone, and a long run stops when you use Stop now. No vision needed.",
+        "set_geometry": "Replaces the outline of a text element on the page. Can be undone. Works without vision, but shapes are better when the model can see the page.",
+        "set_source_text": "Replaces the original-language text of an element, for example to fix an OCR mistake. Can be undone. No vision needed.",
+        "set_translation": "Sets or removes one element's translation, tagged with its language so lines break correctly, and warns when the text does not fit. Can be undone. No vision needed.",
+        "set_translations": "Sets the translations of many elements in one step; if one element is invalid, nothing changes. One Undo reverts the whole call. Warns when text does not fit. No vision needed.",
+        "set_typography": "Replaces an element's font, size, colors, outline, alignment, and writing direction. Can be undone. No vision needed.",
+        "set_visibility": "Shows, hides, or fades elements. Can be undone. No vision needed.",
+        "view_page": "Shows the model one page, or one area of it at full size, as an image so it can check placement and leftover text. Read-only. Needs a model that can see images."
+      },
       "tools": "Tools",
-      "toolsDescription": "Clients can only see and call checked tools. Connected clients are told when this list changes."
+      "toolsDescription": "Clients can only see and call checked tools. Connected clients are told when this list changes.",
+      "toolSummary": {
+        "add_text_box": "Add a text box",
+        "delete_elements": "Delete elements",
+        "delete_pages": "Delete pages",
+        "draw": "Fill an area with a color",
+        "erase": "Erase part of a layer",
+        "export": "Export pages to files",
+        "inspect_page": "Read one page",
+        "inspect_project": "Read the whole project",
+        "move_element": "Reorder an element",
+        "move_page": "Move a page",
+        "remove": "Remove artwork in an area",
+        "rename_page": "Rename a page",
+        "run_pipeline": "Run processing stages",
+        "set_geometry": "Reshape an element",
+        "set_source_text": "Replace source text",
+        "set_translation": "Set one translation",
+        "set_translations": "Set many translations at once",
+        "set_typography": "Change font and style",
+        "set_visibility": "Show, hide, or fade elements",
+        "view_page": "See a page as an image"
+      }
     },
     "pipeline": {
       "description": "Choose the models and options used to process each page.",

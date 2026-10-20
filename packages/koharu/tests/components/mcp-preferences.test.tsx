@@ -10,8 +10,9 @@ import {
   type McpTool,
   type ToolMetadata,
 } from '@koharu/bridge/protocol'
+import { TooltipProvider } from '@koharu/ui/components/tooltip'
 
-function tool(name: string, metadata: Partial<ToolMetadata> = {}): McpTool {
+function tool(name: string, metadata: Partial<ToolMetadata> = {}, enabled = true): McpTool {
   return {
     name,
     metadata: {
@@ -21,6 +22,7 @@ function tool(name: string, metadata: Partial<ToolMetadata> = {}): McpTool {
       destructive: false,
       ...metadata,
     },
+    enabled,
   }
 }
 
@@ -29,13 +31,14 @@ function settings(config: Partial<McpConfig> = {}): McpSettings {
     config: {
       enabled: true,
       port: 47821,
+      profile: 'vision',
       disabled_tools: [],
       export_dir: null,
       ...config,
     },
     tools: [
       tool('inspect_page'),
-      tool('view_page', { vision: 'required' }),
+      tool('view_page', { vision: 'required' }, !config.disabled_tools?.includes('view_page')),
       tool('delete_pages', { group: 'pages', destructive: true }),
     ],
     export_folder: '/home/reader/Documents/Koharu/exports',
@@ -98,11 +101,11 @@ describe('MCP tools settings', () => {
     vi.spyOn(commands, 'getMcpSettings').mockResolvedValue(settings())
     const setTools = vi
       .spyOn(commands, 'setMcpTools')
-      .mockResolvedValue(settings({ disabled_tools: ['view_page'] }))
+      .mockResolvedValue(settings({ profile: 'custom', disabled_tools: ['view_page'] }))
     const view = render(<McpPreferences />)
 
     fireEvent.click(await screen.findByRole('checkbox', { name: 'view_page' }))
-    await waitFor(() => expect(setTools).toHaveBeenCalledWith(['view_page']))
+    await waitFor(() => expect(setTools).toHaveBeenCalledWith('custom', ['view_page']))
     expect(await screen.findByRole('checkbox', { name: 'view_page' })).not.toBeChecked()
     view.unmount()
 
@@ -111,5 +114,32 @@ describe('MCP tools settings', () => {
     for (const checkbox of await screen.findAllByRole('checkbox')) {
       expect(checkbox).toHaveAttribute('aria-disabled', 'true')
     }
+    expect(screen.getByRole('button', { name: 'Text-only model' })).toBeDisabled()
+  })
+
+  it('applies a profile and labels and explains every tool', async () => {
+    useKoharuStore.setState({ mcpStatus: { state: 'off' } })
+    vi.spyOn(commands, 'getMcpSettings').mockResolvedValue(settings())
+    const setTools = vi
+      .spyOn(commands, 'setMcpTools')
+      .mockResolvedValue(settings({ profile: 'text' }))
+    render(
+      <TooltipProvider delay={0}>
+        <McpPreferences />
+      </TooltipProvider>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Vision model' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(screen.getByText('needs vision')).toBeInTheDocument()
+    expect(screen.getByText('deletes')).toBeInTheDocument()
+    expect(screen.getByText('See a page as an image')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'About view_page' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Text-only model' }))
+    await waitFor(() => expect(setTools).toHaveBeenCalledWith('text', []))
+    expect(await screen.findByText('Tools that need to see images are off.')).toBeInTheDocument()
   })
 })

@@ -16,7 +16,8 @@ use tokio::sync::{Notify, watch};
 
 use super::{Server, ServerStatus, Shared, Supervisor, Token, write_pointer};
 use crate::{
-    Config, Control, Host, Invocation, McpConfig, Tool, ToolCall, ToolGroup, ToolMetadata, Vision,
+    Config, Control, Host, Invocation, McpConfig, Tool, ToolCall, ToolGroup, ToolMetadata,
+    ToolProfile, Vision,
 };
 
 /// A representative subset of the tools Koharu's desktop host exposes, in order.
@@ -375,7 +376,7 @@ async fn disabled_tools_are_hidden_refused_and_announced() -> Result<()> {
     .await?;
     assert_eq!(client.list_all_tools().await?.len(), TOOLS.len());
 
-    supervisor.set_disabled_tools(BTreeSet::from(["view_page".to_owned()]))?;
+    supervisor.set_tools(ToolProfile::Text, BTreeSet::new())?;
     tokio::time::timeout(Duration::from_secs(10), listener.tools_changed.notified())
         .await
         .context("the client was not told that the tools changed")?;

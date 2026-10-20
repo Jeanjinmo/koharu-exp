@@ -16,10 +16,12 @@ use super::{Calls, Clients, Shared};
 use crate::{Control, Host, Invocation, Tool, ToolCall, ToolGroup, ToolImage};
 
 // Host-neutral counterpart of the in-app agent instructions. MCP clients receive no
-// injected project context, so they are pointed at `inspect_project` instead.
+// injected project context, so they are told how to read the project themselves.
 const INSTRUCTIONS: &str = r#"These tools operate the manga translation project that is currently open in Koharu.
-Call inspect_project to read the complete current project state before acting, and again after edits instead of assuming their effect. It omits page images. Call view_page only when visual inspection is needed, and only for relevant pages.
-Use the provided tools whenever the user asks to inspect or change the project. Never claim a change succeeded unless its tool result says it succeeded.
+Work page by page. Call inspect_page for the page you work on: it is compact and lists every text element with its ID, box, source text, and translation. Call inspect_project only for an overview of every page; it is large for long projects. Read the state again after edits instead of assuming their effect.
+A typical page: run_pipeline with operation detection and then ocr for the page; remove with the text elements whose original text should disappear; set_translations once with every translation of the page; then check the result with inspect_page, or view_page when you can see images. Fix warnings about text that does not fit by shortening the translation or adjusting its typography.
+If your model cannot see images, do not call view_page: rely on the boxes and text from inspect_page, give remove, draw, and erase areas as element IDs rather than guessed coordinates, and tell the user which pages need a visual check.
+Use the provided tools whenever the user asks to inspect or change the project. Never claim a change succeeded unless its tool result says it succeeded. The user may turn tools off in Koharu's settings; do not try to work around a tool that is unavailable.
 All project changes are revisioned and reversible from Koharu's undo history.
 Do not invent entity identifiers. Preserve artwork and existing authored content unless the user asks to change them."#;
 

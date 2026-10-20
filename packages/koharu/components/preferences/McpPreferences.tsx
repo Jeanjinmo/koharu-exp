@@ -1,7 +1,7 @@
 'use client'
 
 import type { TFunction } from 'i18next'
-import { FolderOpen, RotateCcw } from 'lucide-react'
+import { FolderOpen, Info, RotateCcw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -15,14 +15,20 @@ import { useKoharuStore } from '@/lib/store'
 import {
   commands,
   type McpSettings,
+  type McpTool,
   type ServerStatus,
   type ToolGroup,
+  type ToolProfile,
 } from '@koharu/bridge/protocol'
+import { Badge } from '@koharu/ui/components/badge'
 import { Button } from '@koharu/ui/components/button'
 import { Checkbox } from '@koharu/ui/components/checkbox'
 import { Switch } from '@koharu/ui/components/switch'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@koharu/ui/components/tooltip'
 
 const groups: readonly ToolGroup[] = ['read', 'pages', 'text', 'image', 'pipeline', 'output']
+const profiles: readonly ToolProfile[] = ['vision', 'text', 'read', 'custom']
+type ToolLabel = 'needsVision' | 'betterWithVision' | 'editsImage' | 'deletes'
 
 export function McpPreferences() {
   const { t } = useTranslation()
@@ -44,12 +50,13 @@ export function McpPreferences() {
   // Starting and stopping run one at a time, so the switch waits for each.
   const transitioning = status.state === 'starting' || status.state === 'stopping'
   const serving = status.state === 'starting' || status.state === 'running'
-  const disabled = new Set(settings.config.disabled_tools)
-  const toggleTool = (name: string, enabled: boolean) => {
-    const next = new Set(disabled)
-    if (enabled) next.delete(name)
-    else next.add(name)
-    apply(call(commands.setMcpTools, [...next]))
+  const { enabled, profile } = settings.config
+  // Changing one tool keeps every other tool as it is and makes the selection custom.
+  const toggleTool = (name: string, on: boolean) => {
+    const off = new Set(settings.tools.filter((tool) => !tool.enabled).map((tool) => tool.name))
+    if (on) off.delete(name)
+    else off.add(name)
+    apply(call(commands.setMcpTools, 'custom', [...off]))
   }
 
   return (
@@ -84,7 +91,7 @@ export function McpPreferences() {
               aria-label={t('settings.mcp.enable')}
               checked={serving}
               disabled={transitioning}
-              onCheckedChange={(enabled) => apply(call(commands.setMcpEnabled, enabled))}
+              onCheckedChange={(on) => apply(call(commands.setMcpEnabled, on))}
             />
           </div>
         </PreferenceRow>
@@ -127,6 +134,36 @@ export function McpPreferences() {
         title={t('settings.mcp.tools')}
         description={t('settings.mcp.toolsDescription')}
       >
+        <PreferenceRow
+          title={t('settings.mcp.profile')}
+          description={t('settings.mcp.profileDescription')}
+          align='start'
+        >
+          <div className='grid gap-1.5'>
+            <div className='grid grid-cols-2 gap-0.5 rounded-xl border border-input bg-background p-0.5'>
+              {profiles.map((choice) => (
+                <Button
+                  key={choice}
+                  type='button'
+                  variant='ghost'
+                  size='sm'
+                  disabled={!enabled}
+                  aria-pressed={profile === choice}
+                  data-active={profile === choice}
+                  className='h-8 text-[10px] text-muted-foreground hover:text-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground data-[active=true]:hover:bg-primary/90 data-[active=true]:hover:text-primary-foreground'
+                  onClick={() =>
+                    apply(call(commands.setMcpTools, choice, settings.config.disabled_tools))
+                  }
+                >
+                  {t(`settings.mcp.profiles.${choice}`)}
+                </Button>
+              ))}
+            </div>
+            <p className='text-[10px] leading-4 text-muted-foreground'>
+              {t(`settings.mcp.profileHints.${profile}`)}
+            </p>
+          </div>
+        </PreferenceRow>
         {groups.map((group) => {
           const tools = settings.tools.filter((tool) => tool.metadata.group === group)
           if (tools.length === 0) return null
@@ -137,16 +174,12 @@ export function McpPreferences() {
               </p>
               <ul className='grid gap-2'>
                 {tools.map((tool) => (
-                  <li key={tool.name}>
-                    <label className='flex w-fit items-center gap-2.5 text-[12px]'>
-                      <Checkbox
-                        checked={!disabled.has(tool.name)}
-                        disabled={!settings.config.enabled}
-                        onCheckedChange={(enabled) => toggleTool(tool.name, enabled)}
-                      />
-                      <span className='font-mono text-[11px]'>{tool.name}</span>
-                    </label>
-                  </li>
+                  <ToolRow
+                    key={tool.name}
+                    tool={tool}
+                    disabled={!enabled}
+                    onToggle={(on) => toggleTool(tool.name, on)}
+                  />
                 ))}
               </ul>
             </div>
@@ -155,6 +188,67 @@ export function McpPreferences() {
       </PreferenceSection>
     </PreferencePage>
   )
+}
+
+function ToolRow({
+  tool,
+  disabled,
+  onToggle,
+}: {
+  tool: McpTool
+  disabled: boolean
+  onToggle: (on: boolean) => void
+}) {
+  const { t } = useTranslation()
+  const info = t(`settings.mcp.toolInfo.${tool.name}`, { defaultValue: '' })
+  return (
+    <li className='flex flex-wrap items-center gap-x-2 gap-y-1'>
+      <label className='flex items-center gap-2.5'>
+        <Checkbox checked={tool.enabled} disabled={disabled} onCheckedChange={onToggle} />
+        <span className='font-mono text-[11px]'>{tool.name}</span>
+      </label>
+      {info && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type='button'
+                aria-label={t('settings.mcp.aboutTool', { tool: tool.name })}
+                className='grid size-4 place-items-center rounded-full text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none'
+              />
+            }
+          >
+            <Info className='size-3.5' />
+          </TooltipTrigger>
+          <TooltipContent className='max-w-72 text-[11px] leading-4'>{info}</TooltipContent>
+        </Tooltip>
+      )}
+      <span className='text-[11px] text-muted-foreground'>
+        {t(`settings.mcp.toolSummary.${tool.name}`, { defaultValue: '' })}
+      </span>
+      {toolLabels(tool).map((label) => (
+        <Tooltip key={label}>
+          <TooltipTrigger
+            render={<Badge variant='outline' className='h-4.5 px-1.5 text-[9px] font-normal' />}
+          >
+            {t(`settings.mcp.labels.${label}`)}
+          </TooltipTrigger>
+          <TooltipContent className='max-w-64 text-[11px] leading-4'>
+            {t(`settings.mcp.labelInfo.${label}`)}
+          </TooltipContent>
+        </Tooltip>
+      ))}
+    </li>
+  )
+}
+
+function toolLabels({ metadata }: McpTool): ToolLabel[] {
+  const labels: ToolLabel[] = []
+  if (metadata.vision === 'required') labels.push('needsVision')
+  if (metadata.vision === 'better') labels.push('betterWithVision')
+  if (metadata.mutates_image) labels.push('editsImage')
+  if (metadata.destructive) labels.push('deletes')
+  return labels
 }
 
 function statusText(status: ServerStatus, t: TFunction): string {

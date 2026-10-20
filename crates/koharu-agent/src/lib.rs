@@ -10,6 +10,6 @@ mod tool;
 
 pub use agent::{Agent, Event, Message, Role, RunId, RunResult};
 pub use codex::{Account, Codex, CodexModel, LoginEvent};
-pub use config::{Config, McpConfig, Reasoning};
+pub use config::{Config, McpConfig, Reasoning, ToolProfile};
 pub use control::Control;
 pub use tool::{Host, Invocation, Tool, ToolCall, ToolGroup, ToolImage, ToolMetadata, Vision};

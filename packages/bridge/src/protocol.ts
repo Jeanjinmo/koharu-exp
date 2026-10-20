@@ -19,7 +19,11 @@ export const commands = {
 	getMcpSettings: () => __TAURI_INVOKE<McpSettings>("get_mcp_settings"),
 	/**  Starts or stops the server. Enabling also retries a server that failed. */
 	setMcpEnabled: (enabled: boolean) => __TAURI_INVOKE<McpSettings>("set_mcp_enabled", { enabled }),
-	setMcpTools: (disabledTools: string[]) => __TAURI_INVOKE<McpSettings>("set_mcp_tools", { disabledTools }),
+	/**
+	 *  Chooses the tools MCP clients may use: a preset profile, or the custom
+	 *  profile without `disabled_tools`.
+	 */
+	setMcpTools: (profile: ToolProfile, disabledTools: string[]) => __TAURI_INVOKE<McpSettings>("set_mcp_tools", { profile, disabledTools }),
 	chooseMcpExportFolder: () => __TAURI_INVOKE<McpSettings>("choose_mcp_export_folder"),
 	resetMcpExportFolder: () => __TAURI_INVOKE<McpSettings>("reset_mcp_export_folder"),
 	/**  Cancels the tool calls that a stopping server is still waiting for. */
@@ -324,18 +328,21 @@ export type LocalConfig = Record<string, never>;
 export type LoginEvent = { type: "progress"; message: string } | { type: "device_code"; verification_url: string; user_code: string };
 
 /**
- *  Settings for the agent tools served over MCP. Every field has a default,
- *  so configurations saved before a field existed still load.
+ *  Settings for the agent tools served over MCP. Koharu's configuration loader
+ *  merges saved values over [`McpConfig::default`], so configurations saved
+ *  before a field existed still load.
  */
 export type McpConfig = {
 	/**  Whether Koharu serves MCP at all. */
-	enabled?: boolean,
+	enabled: boolean,
 	/**  Loopback port, read whenever the server starts. */
-	port?: number,
-	/**  Tools that MCP clients can neither list nor call. */
-	disabled_tools?: string[],
+	port: number,
+	/**  Which tools MCP clients may list and call. */
+	profile: ToolProfile,
+	/**  Tools the custom profile turns off. */
+	disabled_tools: string[],
 	/**  Folder that receives agent exports; `None` uses `Documents/Koharu/exports`. */
-	export_dir?: string | null,
+	export_dir: string | null,
 };
 
 export type McpEvent = { type: "status"; status: ServerStatus };
@@ -351,6 +358,8 @@ export type McpSettings = {
 export type McpTool = {
 	name: string,
 	metadata: ToolMetadata,
+	/**  Whether the chosen profile lets MCP clients list and call the tool. */
+	enabled: boolean,
 };
 
 export type MiniMaxConfig = Record<string, never>;
@@ -545,6 +554,20 @@ export type ToolMetadata = {
 	mutates_image: boolean,
 	destructive: boolean,
 };
+
+/**
+ *  A tool selection matched to what the agent's model can do. Koharu cannot
+ *  detect a model's abilities, so the owner chooses one.
+ */
+export type ToolProfile = 
+/**  Every tool, for models that see images. */
+"vision" | 
+/**  Every tool that works without seeing images. */
+"text" | 
+/**  Only tools that read the project. */
+"read" | 
+/**  The tools that `disabled_tools` leaves on. */
+"custom";
 
 export type TransformFrame = {
 	element: EntityId,

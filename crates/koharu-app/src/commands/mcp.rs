@@ -5,7 +5,7 @@ use std::{path::PathBuf, sync::OnceLock};
 
 use anyhow::{Context as _, Result, anyhow};
 use koharu_agent::{
-    Config, McpConfig, ToolMetadata,
+    Config, McpConfig, ToolMetadata, ToolProfile,
     mcp::{ServerStatus, Supervisor},
 };
 use parking_lot::Mutex;
@@ -45,6 +45,8 @@ pub struct McpSettings {
 pub struct McpTool {
     pub name: String,
     pub metadata: ToolMetadata,
+    /// Whether the chosen profile lets MCP clients list and call the tool.
+    pub enabled: bool,
 }
 
 impl McpState {
@@ -101,6 +103,7 @@ impl McpState {
                 .tools()
                 .into_iter()
                 .map(|tool| McpTool {
+                    enabled: config.enables(&tool),
                     name: tool.name,
                     metadata: tool.metadata,
                 })
@@ -136,15 +139,18 @@ pub(crate) async fn set_mcp_enabled(
     Ok(state.settings()?)
 }
 
+/// Chooses the tools MCP clients may use: a preset profile, or the custom
+/// profile without `disabled_tools`.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn set_mcp_tools(
+    profile: ToolProfile,
     disabled_tools: Vec<String>,
     state: State<'_, McpState>,
 ) -> std::result::Result<McpSettings, Error> {
     state
         .supervisor()?
-        .set_disabled_tools(disabled_tools.into_iter().collect())?;
+        .set_tools(profile, disabled_tools.into_iter().collect())?;
     Ok(state.settings()?)
 }
 

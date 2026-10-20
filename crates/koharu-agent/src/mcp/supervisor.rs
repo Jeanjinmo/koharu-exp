@@ -15,7 +15,7 @@ use specta::Type;
 use tokio::{sync::watch, time::Instant};
 
 use super::{Calls, POINTER, Server, Shared, Token, write_pointer};
-use crate::{Config, Host, Tool};
+use crate::{Config, Host, Tool, ToolProfile};
 
 /// How long a busy port is retried before starting fails.
 const BIND_PATIENCE: Duration = Duration::from_secs(3);
@@ -133,10 +133,12 @@ where
         Ok(())
     }
 
-    /// Chooses the tools MCP clients may list and call. Connected clients are
-    /// told when the set changes.
-    pub fn set_disabled_tools(&self, disabled_tools: BTreeSet<String>) -> Result<()> {
+    /// Chooses the tools MCP clients may list and call: a preset `profile`, or
+    /// the custom profile without `disabled_tools`. Connected clients are told
+    /// when the set changes.
+    pub fn set_tools(&self, profile: ToolProfile, disabled_tools: BTreeSet<String>) -> Result<()> {
         let mut config = self.inner.shared.config.write()?;
+        config.mcp.profile = profile;
         config.mcp.disabled_tools = disabled_tools;
         config.save()
     }
