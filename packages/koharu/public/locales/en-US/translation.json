@@ -381,12 +381,16 @@
     "loading": "Loading preferences…",
     "mcp": {
       "aboutTool": "About {{tool}}",
+      "activity": "Activity",
+      "activityDescription": "The last 100 tool calls from MCP clients since Koharu started. Arguments and the token are never recorded.",
       "chooseFolder": "Choose…",
+      "clearActivity": "Clear",
       "defaultFolder": "Use the default folder",
       "description": "Let external agents such as Claude Code, Grok Build, or Hermes work on the open project through Koharu's MCP server. These settings do not affect the built-in agent.",
       "enable": "MCP server",
       "exportFolder": "Export folder",
       "exportFolderDescription": "Where the export tool writes. Every export gets a new folder, and agents cannot choose another location.",
+      "failed": "Failed",
       "groups": {
         "image": "Image",
         "output": "Output",
@@ -407,6 +411,8 @@
         "editsImage": "edits image",
         "needsVision": "needs vision"
       },
+      "noActivity": "No tool calls yet.",
+      "page": "Page {{number}} · {{label}}",
       "profile": "Profile",
       "profileDescription": "Koharu cannot tell what your agent's model can do, so choose the profile that matches it. Changing a checkbox switches to Custom.",
       "profileHints": {
@@ -422,6 +428,7 @@
         "vision": "Vision model"
       },
       "retry": "Retry",
+      "seconds": "{{value}} s",
       "server": "Server",
       "serverDescription": "Clients connect with the URL and token that Koharu writes to ~/.koharu/mcp.json. The port and token stay the same when the server restarts.",
       "status": {
@@ -437,6 +444,7 @@
         "stopping_other": "Stopping… (waiting for {{count}} tasks)"
       },
       "stopNow": "Stop now",
+      "succeeded": "Succeeded",
       "title": "MCP Tools",
       "toolInfo": {
         "add_text_box": "Adds a paragraph text box to a page, for example for text that detection missed. Can be undone. Works without vision, but placement is better when the model can see the page.",

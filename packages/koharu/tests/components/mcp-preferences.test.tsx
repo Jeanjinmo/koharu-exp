@@ -1,7 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render as testingRender, screen, waitFor } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { McpPreferences } from '@/components/preferences/McpPreferences'
+import { pagesKey, projectKey, queryClient } from '@/lib/queries'
 import { useKoharuStore } from '@/lib/store'
 import {
   commands,
@@ -43,6 +46,10 @@ function settings(config: Partial<McpConfig> = {}): McpSettings {
     ],
     export_folder: '/home/reader/Documents/Koharu/exports',
   }
+}
+
+function render(ui: ReactNode) {
+  return testingRender(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
 }
 
 describe('MCP tools settings', () => {
@@ -141,5 +148,68 @@ describe('MCP tools settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Text-only model' }))
     await waitFor(() => expect(setTools).toHaveBeenCalledWith('text', []))
     expect(await screen.findByText('Tools that need to see images are off.')).toBeInTheDocument()
+  })
+
+  it('lists recent tool calls with their pages and clears them', async () => {
+    queryClient.setQueryData(projectKey, {
+      name: 'Book',
+      revision: 1,
+      active_page: 'page-2',
+      can_undo: false,
+      can_redo: false,
+    })
+    queryClient.setQueryData(pagesKey, [
+      {
+        id: 'page-1',
+        label: '001.png',
+        size: { width: 1, height: 1 },
+        source_asset: null,
+        layer_count: 0,
+      },
+      {
+        id: 'page-2',
+        label: '002.png',
+        size: { width: 1, height: 1 },
+        source_asset: null,
+        layer_count: 0,
+      },
+    ])
+    useKoharuStore.setState({
+      mcpStatus: { state: 'off' },
+      mcpActivity: [
+        {
+          finished_at: Date.UTC(2026, 9, 20, 8, 0, 0),
+          tool: 'set_translations',
+          page: 'page-2',
+          ok: true,
+          changed: true,
+          error: null,
+          elapsed_ms: 1250,
+        },
+        {
+          finished_at: Date.UTC(2026, 9, 20, 8, 0, 5),
+          tool: 'view_page',
+          page: null,
+          ok: false,
+          changed: false,
+          error: 'Tool `view_page` is disabled in Koharu settings',
+          elapsed_ms: 0,
+        },
+      ],
+    })
+    vi.spyOn(commands, 'getMcpSettings').mockResolvedValue(settings())
+    const clear = vi.spyOn(commands, 'clearMcpActivity').mockResolvedValue(null)
+    render(<McpPreferences />)
+
+    const log = await screen.findByRole('list', { name: 'Activity' })
+    const rows = log.querySelectorAll('li')
+    expect(rows[0]).toHaveTextContent('view_page')
+    expect(rows[0]).toHaveTextContent('Tool `view_page` is disabled in Koharu settings')
+    expect(rows[1]).toHaveTextContent('set_translations')
+    expect(rows[1]).toHaveTextContent('Page 2 · 002.png')
+    expect(rows[1]).toHaveTextContent('1.3 s')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    await waitFor(() => expect(clear).toHaveBeenCalled())
   })
 })

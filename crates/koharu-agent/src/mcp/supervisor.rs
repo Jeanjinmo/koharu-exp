@@ -12,9 +12,12 @@ use std::{
 use anyhow::{Context as _, Result, bail};
 use serde::Serialize;
 use specta::Type;
-use tokio::{sync::watch, time::Instant};
+use tokio::{
+    sync::{broadcast, watch},
+    time::Instant,
+};
 
-use super::{Calls, POINTER, Server, Shared, Token, write_pointer};
+use super::{ActivityLog, Calls, POINTER, Server, Shared, Token, ToolActivity, write_pointer};
 use crate::{Config, Host, Tool, ToolProfile};
 
 /// How long a busy port is retried before starting fails.
@@ -91,7 +94,11 @@ where
     ) -> Result<Self> {
         let enabled = config.read()?.mcp.enabled;
         let inner = Arc::new(Inner {
-            shared: Arc::new(Shared { host, config }),
+            shared: Arc::new(Shared {
+                host,
+                config,
+                activity: ActivityLog::new(),
+            }),
             token: Mutex::new(token),
             pointer,
             status: watch::Sender::new(ServerStatus::Off),
@@ -141,6 +148,22 @@ where
         config.mcp.profile = profile;
         config.mcp.disabled_tools = disabled_tools;
         config.save()
+    }
+
+    /// The recent tool calls, oldest first.
+    #[must_use]
+    pub fn activity(&self) -> Vec<ToolActivity> {
+        self.inner.shared.activity.entries()
+    }
+
+    /// Every tool call from now on, as it finishes.
+    #[must_use]
+    pub fn subscribe_activity(&self) -> broadcast::Receiver<ToolActivity> {
+        self.inner.shared.activity.subscribe()
+    }
+
+    pub fn clear_activity(&self) {
+        self.inner.shared.activity.clear();
     }
 
     /// Cancels the tool calls that a stopping server is waiting for.

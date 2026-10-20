@@ -1,7 +1,7 @@
 'use client'
 
 import type { TFunction } from 'i18next'
-import { FolderOpen, Info, RotateCcw } from 'lucide-react'
+import { Check, FolderOpen, Info, RotateCcw, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -11,12 +11,15 @@ import {
   PreferenceSection,
 } from '@/components/preferences/PreferenceFields'
 import { call } from '@/lib/backend'
+import { usePages, useProject } from '@/lib/queries'
 import { useKoharuStore } from '@/lib/store'
 import {
   commands,
   type McpSettings,
   type McpTool,
+  type PageSummary,
   type ServerStatus,
+  type ToolActivity,
   type ToolGroup,
   type ToolProfile,
 } from '@koharu/bridge/protocol'
@@ -186,7 +189,80 @@ export function McpPreferences() {
           )
         })}
       </PreferenceSection>
+
+      <ActivityLog />
     </PreferencePage>
+  )
+}
+
+function ActivityLog() {
+  const { t } = useTranslation()
+  const activity = useKoharuStore((state) => state.mcpActivity)
+  const project = useProject().data
+  const pages = usePages(Boolean(project)).data ?? []
+  return (
+    <PreferenceSection
+      title={t('settings.mcp.activity')}
+      description={t('settings.mcp.activityDescription')}
+      action={
+        <Button
+          type='button'
+          size='sm'
+          variant='outline'
+          disabled={activity.length === 0}
+          onClick={() => void call(commands.clearMcpActivity).catch(() => undefined)}
+        >
+          {t('settings.mcp.clearActivity')}
+        </Button>
+      }
+    >
+      {activity.length === 0 ? (
+        <p className='py-4 text-[11px] text-muted-foreground'>{t('settings.mcp.noActivity')}</p>
+      ) : (
+        <ol aria-label={t('settings.mcp.activity')} className='max-h-80 overflow-y-auto py-2'>
+          {activity
+            .map((entry, index) => (
+              <ActivityRow key={`${entry.finished_at}-${index}`} entry={entry} pages={pages} />
+            ))
+            .reverse()}
+        </ol>
+      )}
+    </PreferenceSection>
+  )
+}
+
+function ActivityRow({ entry, pages }: { entry: ToolActivity; pages: PageSummary[] }) {
+  const { t } = useTranslation()
+  const finished = new Date(entry.finished_at)
+  const index = pages.findIndex((page) => page.id === entry.page)
+  const page =
+    index >= 0
+      ? t('settings.mcp.page', { number: index + 1, label: pages[index].label })
+      : entry.page?.slice(0, 8)
+  return (
+    <li className='grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 py-1.5 text-[11px]'>
+      <time dateTime={finished.toISOString()} className='text-muted-foreground tabular-nums'>
+        {finished.toLocaleTimeString()}
+      </time>
+      <div className='min-w-0'>
+        <div className='flex flex-wrap items-center gap-x-2'>
+          {entry.ok ? (
+            <Check aria-hidden='true' className='size-3.5 text-primary' />
+          ) : (
+            <X aria-hidden='true' className='size-3.5 text-destructive' />
+          )}
+          <span className='sr-only'>
+            {entry.ok ? t('settings.mcp.succeeded') : t('settings.mcp.failed')}
+          </span>
+          <span className='font-mono'>{entry.tool}</span>
+          {page && <span className='text-muted-foreground'>{page}</span>}
+          <span className='text-muted-foreground tabular-nums'>
+            {t('settings.mcp.seconds', { value: (entry.elapsed_ms / 1000).toFixed(1) })}
+          </span>
+        </div>
+        {entry.error && <p className='mt-0.5 break-words text-destructive'>{entry.error}</p>}
+      </div>
+    </li>
   )
 }
 

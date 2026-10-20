@@ -74,7 +74,10 @@ const startupState = (): StartupState => ({
     size: [0, 0],
     element_frames: [],
   },
-  mcp: { state: 'running', url: 'http://127.0.0.1:47821/mcp', clients: 0 },
+  mcp: {
+    status: { state: 'running', url: 'http://127.0.0.1:47821/mcp', clients: 0 },
+    activity: [],
+  },
 })
 
 async function start() {
@@ -175,7 +178,7 @@ describe('Tauri runtime', () => {
     dispose()
   })
 
-  it('tracks the MCP server status from startup and live events', async () => {
+  it('tracks the MCP server status and activity from startup and live events', async () => {
     const { binding, dispose } = await start()
     expect(useKoharuStore.getState().mcpStatus).toEqual({
       state: 'running',
@@ -185,8 +188,27 @@ describe('Tauri runtime', () => {
     const mcpChannel = binding.mock.calls[0][5]
 
     act(() => mcpChannel.onmessage({ type: 'status', status: { state: 'stopping', tasks: 2 } }))
+    act(() =>
+      mcpChannel.onmessage({
+        type: 'activity',
+        activity: {
+          finished_at: 1,
+          tool: 'inspect_page',
+          page: 'page',
+          ok: true,
+          changed: false,
+          error: null,
+          elapsed_ms: 3,
+        },
+      }),
+    )
 
     expect(useKoharuStore.getState().mcpStatus).toEqual({ state: 'stopping', tasks: 2 })
+    expect(useKoharuStore.getState().mcpActivity.map((entry) => entry.tool)).toEqual([
+      'inspect_page',
+    ])
+    act(() => mcpChannel.onmessage({ type: 'activity_cleared' }))
+    expect(useKoharuStore.getState().mcpActivity).toEqual([])
     dispose()
   })
 

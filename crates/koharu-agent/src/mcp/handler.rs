@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use anyhow::{Context as _, Result, bail};
 use rmcp::{
@@ -12,7 +12,7 @@ use rmcp::{
 };
 use serde_json::Value;
 
-use super::{Calls, Clients, Shared};
+use super::{Calls, Clients, Shared, ToolActivity};
 use crate::{Control, Host, Invocation, Tool, ToolCall, ToolGroup, ToolImage};
 
 // Host-neutral counterpart of the in-app agent instructions. MCP clients receive no
@@ -77,38 +77,24 @@ where
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
+        let started = Instant::now();
         let call = ToolCall {
             call_id: context.id.to_string(),
             name: request.name.into_owned(),
             arguments: Value::Object(request.arguments.unwrap_or_default()).to_string(),
         };
-        let disabled = self
-            .shared
-            .disables(&call.name)
-            .map_err(|error| ErrorData::internal_error(format!("{error:#}"), None))?;
-        if disabled {
-            return Ok(refusal(format!(
-                "Tool `{}` is disabled in Koharu settings",
-                call.name
-            )));
-        }
-        let control = Control::default();
-        let Some(_call) = self.calls.begin(control.clone()) else {
-            return Ok(refusal(
-                "Koharu's MCP server is stopping and accepts no new tool calls".to_owned(),
-            ));
-        };
-        let mut invocation = self.shared.host.invoke(call, &control);
-        // A cancelled MCP request stops the host through the same control as an
-        // in-app agent run; the invocation still finishes so it can clean up.
-        let invocation = tokio::select! {
-            invocation = &mut invocation => invocation,
-            () = context.ct.cancelled() => {
-                control.cancel();
-                invocation.await
-            }
-        };
-        Ok(result(invocation).into())
+        let tool = call.name.clone();
+        let (result, page, changed) = self.run(call, &context).await?;
+        let activity = ToolActivity::new(tool, started.elapsed());
+        self.shared.activity.record(match result.is_error {
+            Some(true) => activity.failed(first_text(&result)),
+            _ => ToolActivity {
+                page,
+                changed,
+                ..activity
+            },
+        });
+        Ok(result.into())
     }
 
     async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
@@ -129,8 +115,57 @@ where
     }
 }
 
-fn refusal(message: String) -> CallToolResponse {
-    CallToolResult::error(vec![ContentBlock::text(message)]).into()
+impl<H> Handler<H>
+where
+    H: Host,
+{
+    /// Runs one call unless Koharu's settings or a stopping server refuse it.
+    /// Also returns the page the call worked on and whether it changed the project.
+    async fn run(
+        &self,
+        call: ToolCall,
+        context: &RequestContext<RoleServer>,
+    ) -> Result<(CallToolResult, Option<String>, bool), ErrorData> {
+        let disabled = self
+            .shared
+            .disables(&call.name)
+            .map_err(|error| ErrorData::internal_error(format!("{error:#}"), None))?;
+        if disabled {
+            let message = format!("Tool `{}` is disabled in Koharu settings", call.name);
+            return Ok((refusal(message), None, false));
+        }
+        let control = Control::default();
+        let Some(_call) = self.calls.begin(control.clone()) else {
+            let message = "Koharu's MCP server is stopping and accepts no new tool calls";
+            return Ok((refusal(message.to_owned()), None, false));
+        };
+        let mut invocation = self.shared.host.invoke(call, &control);
+        // A cancelled MCP request stops the host through the same control as an
+        // in-app agent run; the invocation still finishes so it can clean up.
+        let invocation = tokio::select! {
+            invocation = &mut invocation => invocation,
+            () = context.ct.cancelled() => {
+                control.cancel();
+                invocation.await
+            }
+        };
+        let (page, changed) = invocation.as_ref().map_or((None, false), |invocation| {
+            (invocation.page.clone(), invocation.changed)
+        });
+        Ok((result(invocation), page, changed))
+    }
+}
+
+fn refusal(message: String) -> CallToolResult {
+    CallToolResult::error(vec![ContentBlock::text(message)])
+}
+
+fn first_text(result: &CallToolResult) -> &str {
+    result
+        .content
+        .iter()
+        .find_map(|block| block.as_text())
+        .map_or("", |text| text.text.as_str())
 }
 
 fn tool(tool: Tool) -> Result<rmcp::model::Tool> {

@@ -97,6 +97,18 @@ impl KoharuHost {
         }))
     }
 
+    /// The page that holds `element`, read before an edit changes it.
+    async fn page_of(&self, element: EntityId) -> Result<EntityId> {
+        Project::containing_page(&self.snapshot().await?, element)
+    }
+
+    async fn first_page_of(&self, elements: &[EntityId]) -> Result<Option<EntityId>> {
+        match elements.first() {
+            Some(element) => Ok(Some(self.page_of(*element).await?)),
+            None => Ok(None),
+        }
+    }
+
     async fn snapshot(&self) -> Result<Snapshot> {
         Ok(self
             .handle
@@ -195,6 +207,7 @@ impl KoharuHost {
 
     async fn run_pipeline(&self, arguments: RunPipeline, control: &Control) -> Result<Invocation> {
         let scope = arguments.scope()?;
+        let page = first_page(&self.snapshot().await?, &scope);
         let region_page = match scope {
             Scope::Region { page, .. } => Some(page),
             _ => None,
@@ -217,7 +230,7 @@ impl KoharuHost {
             let after = text_elements(&self.snapshot().await?, page)?;
             result["added_elements"] = json!(after.difference(&before).collect::<Vec<_>>());
         }
-        Invocation::changed(result)
+        Ok(on_page(Invocation::changed(result)?, page))
     }
 
     /// Inpaints only the given area of a page into its cleanup layer.
@@ -248,13 +261,14 @@ impl KoharuHost {
                 .flatten()
                 .is_some_and(|raster| raster.kind == RasterLayerKind::Cleanup)
         });
-        Invocation::changed(json!({
+        Ok(Invocation::changed(json!({
             "page": page,
             "area": [bounds.x, bounds.y, bounds.width, bounds.height],
             "cleanup_layer": cleanup_layer,
             "base_revision": report.base,
             "final_revision": report.final_revision,
-        }))
+        }))?
+        .on_page(page))
     }
 
     async fn mask(&self, page: EntityId, arguments: AreaArguments) -> Result<Mask> {
@@ -341,7 +355,10 @@ impl Host for KoharuHost {
             "inspect_page" => {
                 let arguments: InspectPage = arguments(&call)?;
                 let page = entity(&arguments.page)?;
-                Invocation::read(outline::page_outline(&self.snapshot().await?, page)?)
+                Ok(
+                    Invocation::read(outline::page_outline(&self.snapshot().await?, page)?)?
+                        .on_page(page),
+                )
             }
             "view_page" => {
                 let arguments: ViewPage = arguments(&call)?;
@@ -371,7 +388,8 @@ impl Host for KoharuHost {
                 .with_image(
                     format!("Rendered page {label} ({page}), area {x},{y} {width}x{height}"),
                     format!("data:image/webp;base64,{}", STANDARD.encode(preview.webp)),
-                ))
+                )
+                .on_page(page))
             }
             "rename_page" => {
                 let arguments: RenamePage = arguments(&call)?;
@@ -385,6 +403,7 @@ impl Host for KoharuHost {
                     })
                 })
                 .await
+                .map(|invocation| invocation.on_page(page))
             }
             "move_page" => {
                 let arguments: MovePage = arguments(&call)?;
@@ -398,6 +417,7 @@ impl Host for KoharuHost {
                     })
                 })
                 .await
+                .map(|invocation| invocation.on_page(page))
             }
             "delete_pages" => {
                 let arguments: DeletePages = arguments(&call)?;
@@ -429,10 +449,12 @@ impl Host for KoharuHost {
                     })
                 })
                 .await
+                .map(|invocation| invocation.on_page(page))
             }
             "set_source_text" => {
                 let arguments: SetText = arguments(&call)?;
                 let element = entity(&arguments.element)?;
+                let page = self.page_of(element).await?;
                 self.mutate(|project| {
                     Box::pin(async move {
                         Ok((
@@ -442,10 +464,12 @@ impl Host for KoharuHost {
                     })
                 })
                 .await
+                .map(|invocation| invocation.on_page(page))
             }
             "set_translation" => {
                 let arguments: SetTranslation = arguments(&call)?;
                 let element = entity(&arguments.element)?;
+                let page = self.page_of(element).await?;
                 let Some(text) = arguments.text else {
                     return self
                         .mutate(|project| {
@@ -456,7 +480,8 @@ impl Host for KoharuHost {
                                 ))
                             })
                         })
-                        .await;
+                        .await
+                        .map(|invocation| invocation.on_page(page));
                 };
                 let language = match explicit_language(arguments.language)? {
                     Some(language) => language,
@@ -475,11 +500,13 @@ impl Host for KoharuHost {
                     })
                     .await?;
                 let warnings = self.text_fit(&committed.snapshot, &[element]).await?;
-                committed.invocation(json!({
-                    "element": element,
-                    "language": language.as_str(),
-                    "warnings": warnings,
-                }))
+                Ok(committed
+                    .invocation(json!({
+                        "element": element,
+                        "language": language.as_str(),
+                        "warnings": warnings,
+                    }))?
+                    .on_page(page))
             }
             "set_translations" => {
                 let arguments: SetTranslations = arguments(&call)?;
@@ -503,13 +530,17 @@ impl Host for KoharuHost {
                     .iter()
                     .map(|update| update.layer)
                     .collect::<Vec<_>>();
+                let page = self.first_page_of(&elements).await?;
                 let (committed, ()) = self
                     .commit(|project| {
                         Box::pin(async move { Ok((project.set_translations(updates).await?, ())) })
                     })
                     .await?;
                 let warnings = self.text_fit(&committed.snapshot, &elements).await?;
-                committed.invocation(json!({ "elements": elements, "warnings": warnings }))
+                Ok(on_page(
+                    committed.invocation(json!({ "elements": elements, "warnings": warnings }))?,
+                    page,
+                ))
             }
             "set_typography" => {
                 let arguments: SetTypography = arguments(&call)?;
@@ -526,6 +557,7 @@ impl Host for KoharuHost {
                     alignment: arguments.alignment.map(Into::into),
                     writing_mode: arguments.writing_mode.map(Into::into),
                 };
+                let page = self.page_of(element).await?;
                 self.mutate(|project| {
                     Box::pin(async move {
                         Ok((
@@ -540,6 +572,7 @@ impl Host for KoharuHost {
                     })
                 })
                 .await
+                .map(|invocation| invocation.on_page(page))
             }
             "set_geometry" => {
                 let arguments: SetGeometry = arguments(&call)?;
@@ -552,6 +585,7 @@ impl Host for KoharuHost {
                         y: point.y,
                     })
                     .collect();
+                let page = self.page_of(element).await?;
                 self.mutate(|project| {
                     Box::pin(async move {
                         Ok((
@@ -566,10 +600,12 @@ impl Host for KoharuHost {
                     })
                 })
                 .await
+                .map(|invocation| invocation.on_page(page))
             }
             "set_visibility" => {
                 let arguments: SetVisibility = arguments(&call)?;
                 let elements = entities(&arguments.elements)?;
+                let page = self.first_page_of(&elements).await?;
                 self.mutate(|project| {
                     Box::pin(async move {
                         Ok((
@@ -585,10 +621,12 @@ impl Host for KoharuHost {
                     })
                 })
                 .await
+                .map(|invocation| on_page(invocation, page))
             }
             "delete_elements" => {
                 let arguments: DeleteElements = arguments(&call)?;
                 let elements = entities(&arguments.elements)?;
+                let page = self.first_page_of(&elements).await?;
                 self.mutate(|project| {
                     Box::pin(async move {
                         Ok((
@@ -598,11 +636,13 @@ impl Host for KoharuHost {
                     })
                 })
                 .await
+                .map(|invocation| on_page(invocation, page))
             }
             "move_element" => {
                 let arguments: MoveElement = arguments(&call)?;
                 let element = entity(&arguments.element)?;
                 let parent = entity(&arguments.parent)?;
+                let page = self.page_of(element).await?;
                 self.mutate(|project| {
                     Box::pin(async move {
                         Ok((
@@ -612,6 +652,7 @@ impl Host for KoharuHost {
                     })
                 })
                 .await
+                .map(|invocation| invocation.on_page(page))
             }
             "remove" => self.remove(arguments(&call)?, control).await,
             "export" => {
@@ -669,6 +710,7 @@ impl Host for KoharuHost {
                     })
                 })
                 .await
+                .map(|invocation| invocation.on_page(page))
             }
             "draw" => {
                 let arguments: Draw = arguments(&call)?;
@@ -691,6 +733,7 @@ impl Host for KoharuHost {
                     })
                 })
                 .await
+                .map(|invocation| invocation.on_page(page))
             }
             "run_pipeline" => self.run_pipeline(arguments(&call)?, control).await,
             name => bail!("unknown Koharu tool {name}"),
@@ -981,6 +1024,28 @@ fn hex_color(value: &str) -> Result<[u8; 4]> {
     color
         .and_then(|color| color.try_into().ok())
         .with_context(|| format!("{value:?} is not a #RRGGBB or #RRGGBBAA color"))
+}
+
+fn on_page(invocation: Invocation, page: Option<EntityId>) -> Invocation {
+    match page {
+        Some(page) => invocation.on_page(page),
+        None => invocation,
+    }
+}
+
+/// The first page, in project order, that a pipeline run works on.
+fn first_page(snapshot: &Snapshot, scope: &Scope) -> Option<EntityId> {
+    match scope {
+        Scope::Project => snapshot.pages().next().map(|page| page.id()),
+        Scope::Pages(pages) => snapshot
+            .pages()
+            .map(|page| page.id())
+            .find(|page| pages.contains(page)),
+        Scope::Region { page, .. } => Some(*page),
+        Scope::Entities(entities) => entities
+            .iter()
+            .find_map(|entity| Project::containing_page(snapshot, *entity).ok()),
+    }
 }
 
 fn text_elements(snapshot: &Snapshot, page: EntityId) -> Result<BTreeSet<EntityId>> {
@@ -1410,6 +1475,47 @@ mod tests {
             .scope()
             .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn pipeline_runs_follow_their_first_page_in_project_order() {
+        let mut session = koharu_scene::Session::memory().await.unwrap();
+        let mut pages = Vec::new();
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                for label in ["1", "2", "3"] {
+                    pages.push(edit.add_page(
+                        koharu_scene::PageDraft::new(label, 10.0, 10.0),
+                        koharu_scene::At::End,
+                    )?);
+                }
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+
+        assert_eq!(first_page(&snapshot, &Scope::Project), Some(pages[0]));
+        assert_eq!(
+            first_page(&snapshot, &Scope::Pages(vec![pages[2], pages[1]])),
+            Some(pages[1])
+        );
+        assert_eq!(
+            first_page(
+                &snapshot,
+                &Scope::Region {
+                    page: pages[2],
+                    bounds: Bounds {
+                        x: 0.0,
+                        y: 0.0,
+                        width: 1.0,
+                        height: 1.0,
+                    },
+                },
+            ),
+            Some(pages[2])
+        );
+        assert_eq!(first_page(&snapshot, &Scope::Entities(Vec::new())), None);
     }
 
     #[test]

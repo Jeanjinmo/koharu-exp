@@ -1,6 +1,7 @@
 //! Loopback Model Context Protocol server that exposes a [`Host`]'s tools to
 //! external agents over Streamable HTTP.
 
+mod activity;
 mod calls;
 mod clients;
 mod handler;
@@ -41,8 +42,11 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{Config, Host, Tool};
 
-pub use self::supervisor::{ServerStatus, Supervisor};
-use self::{calls::Calls, clients::Clients, handler::Handler, token::Token};
+use self::{activity::ActivityLog, calls::Calls, clients::Clients, handler::Handler, token::Token};
+pub use self::{
+    activity::ToolActivity,
+    supervisor::{ServerStatus, Supervisor},
+};
 
 const PATH: &str = "/mcp";
 const POINTER: &str = "mcp.json";
@@ -53,6 +57,7 @@ type Body = BoxBody<Bytes, Infallible>;
 struct Shared<H> {
     host: H,
     config: koharu_config::Config<Config>,
+    activity: ActivityLog,
 }
 
 impl<H> Shared<H>

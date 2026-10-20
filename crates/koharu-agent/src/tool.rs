@@ -89,6 +89,9 @@ pub struct Invocation {
     pub value: Value,
     pub changed: bool,
     pub images: Vec<ToolImage>,
+    /// The page the call worked on, for activity logs and for following the
+    /// agent. It is not part of the result sent to the model.
+    pub page: Option<String>,
 }
 
 impl Invocation {
@@ -97,6 +100,7 @@ impl Invocation {
             value: serde_json::to_value(value)?,
             changed: false,
             images: Vec::new(),
+            page: None,
         })
     }
 
@@ -105,7 +109,14 @@ impl Invocation {
             value: serde_json::to_value(value)?,
             changed: true,
             images: Vec::new(),
+            page: None,
         })
+    }
+
+    #[must_use]
+    pub fn on_page(mut self, page: impl ToString) -> Self {
+        self.page = Some(page.to_string());
+        self
     }
 
     #[must_use]

@@ -14,7 +14,7 @@ use super::{
     agent::AgentState,
     canvas::CanvasChannel,
     import,
-    mcp::{McpChannel, McpEvent, McpState},
+    mcp::{McpChannel, McpEvent, McpOverview, McpState},
     preferences::Preferences,
     processing::{Job, JobChannel, Processing},
     project::{
@@ -27,7 +27,7 @@ pub struct StartupState {
     pub preferences: Preferences,
     pub jobs: Vec<Job>,
     pub canvas: CanvasState,
-    pub mcp: koharu_agent::mcp::ServerStatus,
+    pub mcp: McpOverview,
 }
 
 #[derive(Clone, Debug, Serialize, Type)]
@@ -181,7 +181,7 @@ pub(crate) async fn subscribe(
             .cloned()
             .collect(),
         canvas,
-        mcp: handle.state::<McpState>().status(),
+        mcp: handle.state::<McpState>().overview(),
     })
 }
 

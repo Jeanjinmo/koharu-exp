@@ -14,7 +14,7 @@ use rmcp::{
 use serde_json::{Value, json};
 use tokio::sync::{Notify, watch};
 
-use super::{Server, ServerStatus, Shared, Supervisor, Token, write_pointer};
+use super::{ActivityLog, Server, ServerStatus, Shared, Supervisor, Token, write_pointer};
 use crate::{
     Config, Control, Host, Invocation, McpConfig, Tool, ToolCall, ToolGroup, ToolMetadata,
     ToolProfile, Vision,
@@ -76,9 +76,10 @@ impl Host for FakeHost {
             "inspect_project" => Invocation::read(json!({ "pages": [] })),
             "view_page" => Ok(Invocation::read(json!({ "page": "page" }))?
                 .with_image("Rendered page", format!("data:image/webp;base64,{PIXEL}"))),
-            "set_translation" => {
-                Invocation::changed(serde_json::from_str::<Value>(&call.arguments)?)
-            }
+            "set_translation" => Ok(Invocation::changed(serde_json::from_str::<Value>(
+                &call.arguments,
+            )?)?
+            .on_page("page")),
             "run_pipeline" => {
                 self.started.notify_one();
                 control.cancelled().await;
@@ -120,6 +121,7 @@ async fn start(host: FakeHost) -> Result<(Server, Token)> {
     let shared = Arc::new(Shared {
         host,
         config: config(McpConfig::default()),
+        activity: ActivityLog::new(),
     });
     let server = Server::bind(shared, 0, token.clone()).await?;
     Ok((server, token))
@@ -392,6 +394,80 @@ async fn disabled_tools_are_hidden_refused_and_announced() -> Result<()> {
         text_of(&refused.content),
         Some("Tool `view_page` is disabled in Koharu settings")
     );
+    client.cancel().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn finished_calls_are_logged_without_their_arguments() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let (supervisor, token) = supervise(
+        FakeHost::default(),
+        McpConfig {
+            port: 0,
+            profile: ToolProfile::Read,
+            ..McpConfig::default()
+        },
+        &directory.path().join("mcp.json"),
+    )?;
+    let running = reaches(&mut supervisor.status(), |status| {
+        running_url(status).is_some()
+    })
+    .await?;
+    let client = connect_as((), running_url(&running).context("url")?, &token).await?;
+    let mut recorded = supervisor.subscribe_activity();
+
+    client
+        .call_tool(CallToolRequestParams::new("inspect_project"))
+        .await?;
+    client
+        .call_tool(
+            CallToolRequestParams::new("set_translation").with_arguments(
+                json!({ "text": "secret" })
+                    .as_object()
+                    .cloned()
+                    .context("object")?,
+            ),
+        )
+        .await?;
+    supervisor.set_tools(ToolProfile::Vision, BTreeSet::new())?;
+    client
+        .call_tool(
+            CallToolRequestParams::new("set_translation").with_arguments(
+                json!({ "text": "secret" })
+                    .as_object()
+                    .cloned()
+                    .context("object")?,
+            ),
+        )
+        .await?;
+
+    let activity = supervisor.activity();
+    assert_eq!(
+        activity
+            .iter()
+            .map(|entry| (
+                entry.tool.as_str(),
+                entry.ok,
+                entry.changed,
+                entry.page.as_deref()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("inspect_project", true, false, None),
+            ("set_translation", false, false, None),
+            ("set_translation", true, true, Some("page")),
+        ]
+    );
+    assert_eq!(
+        activity[1].error.as_deref(),
+        Some("Tool `set_translation` is disabled in Koharu settings")
+    );
+    assert!(!format!("{activity:?}").contains("secret"));
+    assert_eq!(recorded.recv().await?.tool, "inspect_project");
+
+    supervisor.clear_activity();
+    assert!(supervisor.activity().is_empty());
     client.cancel().await?;
     Ok(())
 }

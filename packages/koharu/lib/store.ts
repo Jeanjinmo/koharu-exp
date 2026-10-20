@@ -15,6 +15,7 @@ import type {
   Stage,
   StartupState,
   ModelResources,
+  ToolActivity,
 } from '@koharu/bridge/protocol'
 import { toast } from '@koharu/ui/components/toast'
 
@@ -44,6 +45,8 @@ interface KoharuStore {
   jobs: Record<string, Job>
   downloads: Record<string, Download>
   mcpStatus: ServerStatus
+  /** Recent MCP tool calls, oldest first, as the backend keeps them. */
+  mcpActivity: ToolActivity[]
   camera: { zoom: number; translation: [number, number]; fitted: boolean }
   canvasPage: EntityId | null
   canvasRevision: number | null
@@ -93,6 +96,7 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   jobs: {},
   downloads: {},
   mcpStatus: { state: 'off' },
+  mcpActivity: [],
   camera: { zoom: 1, translation: [0, 0], fitted: true },
   canvasPage: null,
   canvasRevision: null,
@@ -141,15 +145,26 @@ export function receiveStartupState(state: StartupState): void {
     initialized: true,
     preferences: state.preferences,
     jobs: byId(state.jobs),
-    mcpStatus: state.mcp,
+    mcpStatus: state.mcp.status,
+    mcpActivity: state.mcp.activity,
     ...canvasSnapshot(state.canvas),
   })
 }
+
+const MCP_ACTIVITY_LIMIT = 100
 
 export function receiveMcpEvent(event: McpEvent): void {
   switch (event.type) {
     case 'status':
       useKoharuStore.setState({ mcpStatus: event.status })
+      break
+    case 'activity':
+      useKoharuStore.setState((state) => ({
+        mcpActivity: [...state.mcpActivity, event.activity].slice(-MCP_ACTIVITY_LIMIT),
+      }))
+      break
+    case 'activity_cleared':
+      useKoharuStore.setState({ mcpActivity: [] })
       break
   }
 }

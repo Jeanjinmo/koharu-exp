@@ -6,13 +6,14 @@ use std::{path::PathBuf, sync::OnceLock};
 use anyhow::{Context as _, Result, anyhow};
 use koharu_agent::{
     Config, McpConfig, ToolMetadata, ToolProfile,
-    mcp::{ServerStatus, Supervisor},
+    mcp::{ServerStatus, Supervisor, ToolActivity},
 };
 use parking_lot::Mutex;
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager as _, State, WebviewWindow, ipc::Channel};
 use tauri_runtime_cef::CefRuntime;
+use tokio::sync::broadcast::error::RecvError;
 
 use super::{ChannelExt as _, Error, agent::KoharuHost};
 
@@ -30,6 +31,16 @@ pub(crate) struct McpChannel {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum McpEvent {
     Status { status: ServerStatus },
+    Activity { activity: ToolActivity },
+    ActivityCleared,
+}
+
+/// What the UI shows about the MCP server when it starts.
+#[derive(Clone, Debug, Serialize, Type)]
+pub struct McpOverview {
+    pub status: ServerStatus,
+    /// The recent tool calls, oldest first.
+    pub activity: Vec<ToolActivity>,
 }
 
 #[derive(Clone, Debug, Serialize, Type)]
@@ -56,10 +67,11 @@ impl McpState {
     pub(crate) fn start(&self, handle: AppHandle<CefRuntime>) -> Result<()> {
         let supervisor = Supervisor::new(KoharuHost::new(handle.clone()), Config::load()?)?;
         let mut status = supervisor.status();
+        let status_handle = handle.clone();
         drop(tauri::async_runtime::spawn(async move {
             loop {
                 let current = status.borrow_and_update().clone();
-                handle
+                status_handle
                     .state::<McpChannel>()
                     .channel
                     .publish(McpEvent::Status { status: current });
@@ -68,17 +80,37 @@ impl McpState {
                 }
             }
         }));
+        let mut activity = supervisor.subscribe_activity();
+        drop(tauri::async_runtime::spawn(async move {
+            loop {
+                match activity.recv().await {
+                    Ok(activity) => handle
+                        .state::<McpChannel>()
+                        .channel
+                        .publish(McpEvent::Activity { activity }),
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "the MCP activity log fell behind");
+                    }
+                    Err(RecvError::Closed) => break,
+                }
+            }
+        }));
         self.supervisor
             .set(supervisor)
             .map_err(|_| anyhow!("the MCP server is already supervised"))
     }
 
-    pub(crate) fn status(&self) -> ServerStatus {
-        self.supervisor
-            .get()
-            .map_or(ServerStatus::Off, |supervisor| {
-                supervisor.status().borrow().clone()
-            })
+    pub(crate) fn overview(&self) -> McpOverview {
+        match self.supervisor.get() {
+            Some(supervisor) => McpOverview {
+                status: supervisor.status().borrow().clone(),
+                activity: supervisor.activity(),
+            },
+            None => McpOverview {
+                status: ServerStatus::Off,
+                activity: Vec::new(),
+            },
+        }
     }
 
     /// Closes the server at once, cancelling the tool calls it is running.
@@ -179,6 +211,17 @@ pub(crate) async fn reset_mcp_export_folder(
 ) -> std::result::Result<McpSettings, Error> {
     set_export_dir(None)?;
     Ok(state.settings()?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn clear_mcp_activity(
+    state: State<'_, McpState>,
+    channel: State<'_, McpChannel>,
+) -> std::result::Result<(), Error> {
+    state.supervisor()?.clear_activity();
+    channel.channel.publish(McpEvent::ActivityCleared);
+    Ok(())
 }
 
 /// Cancels the tool calls that a stopping server is still waiting for.

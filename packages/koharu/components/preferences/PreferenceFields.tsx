@@ -28,19 +28,25 @@ export function PreferencePage({
 export function PreferenceSection({
   title,
   description,
+  action,
   children,
 }: {
   title: string
   description?: string
+  /** A control that acts on the whole section, shown beside its title. */
+  action?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
     <section>
-      <div className='mb-3'>
-        <h3 className='text-[12px] font-semibold'>{title}</h3>
-        {description && (
-          <p className='mt-0.5 text-[11px] leading-4 text-muted-foreground'>{description}</p>
-        )}
+      <div className='mb-3 flex items-end gap-3'>
+        <div className='min-w-0 flex-1'>
+          <h3 className='text-[12px] font-semibold'>{title}</h3>
+          {description && (
+            <p className='mt-0.5 text-[11px] leading-4 text-muted-foreground'>{description}</p>
+          )}
+        </div>
+        {action}
       </div>
       <div className='divide-y divide-border rounded-xl border border-border/80 bg-[var(--surface-panel)] px-5'>
         {children}
