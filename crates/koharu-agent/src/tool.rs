@@ -19,19 +19,59 @@ pub struct Tool {
     pub description: String,
     pub parameters: Value,
     pub strict: bool,
+    /// Host-side classification for settings and MCP annotations. It is never
+    /// part of the function definition sent to a model.
+    #[serde(skip)]
+    pub metadata: ToolMetadata,
 }
 
 impl Tool {
     #[must_use]
-    pub fn new(name: impl Into<String>, description: impl Into<String>, parameters: Value) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        parameters: Value,
+        metadata: ToolMetadata,
+    ) -> Self {
+        let mut description = description.into();
+        if metadata.vision == Vision::Required {
+            description.push_str(" (requires image input)");
+        }
         Self {
             kind: "function",
             name: name.into(),
-            description: description.into(),
+            description,
             parameters,
             strict: false,
+            metadata,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ToolMetadata {
+    pub group: ToolGroup,
+    pub vision: Vision,
+    pub mutates_image: bool,
+    pub destructive: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ToolGroup {
+    Read,
+    Pages,
+    Text,
+    Image,
+    Pipeline,
+    Output,
+}
+
+/// How much a tool depends on the model seeing images.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Vision {
+    Required,
+    Better,
+    None,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -82,4 +122,50 @@ pub trait Host: Send + Sync + 'static {
     fn tools(&self) -> Vec<Tool>;
 
     async fn invoke(&self, call: ToolCall, control: &Control) -> Result<Invocation>;
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn metadata(vision: Vision) -> ToolMetadata {
+        ToolMetadata {
+            group: ToolGroup::Read,
+            vision,
+            mutates_image: false,
+            destructive: false,
+        }
+    }
+
+    #[test]
+    fn vision_requirements_are_stated_to_the_model() {
+        let required = Tool::new("look", "Look.", json!({}), metadata(Vision::Required));
+        let better = Tool::new("place", "Place.", json!({}), metadata(Vision::Better));
+
+        assert_eq!(required.description, "Look. (requires image input)");
+        assert_eq!(better.description, "Place.");
+    }
+
+    #[test]
+    fn metadata_is_not_part_of_the_model_definition() {
+        let tool = Tool::new(
+            "look",
+            "Look.",
+            json!({ "type": "object" }),
+            metadata(Vision::Required),
+        );
+
+        assert_eq!(
+            serde_json::to_value(tool).unwrap(),
+            json!({
+                "type": "function",
+                "name": "look",
+                "description": "Look. (requires image input)",
+                "parameters": { "type": "object" },
+                "strict": false,
+            })
+        );
+    }
 }

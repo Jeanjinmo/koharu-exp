@@ -5,13 +5,13 @@ use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-        ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig,
+        ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, ToolAnnotations,
     },
     service::RequestContext,
 };
 use serde_json::Value;
 
-use crate::{Control, Host, Invocation, Tool, ToolCall, ToolImage};
+use crate::{Control, Host, Invocation, Tool, ToolCall, ToolGroup, ToolImage};
 
 // Host-neutral counterpart of the in-app agent instructions. MCP clients receive no
 // injected project context, so they are pointed at `inspect_project` instead.
@@ -88,7 +88,12 @@ fn tool(tool: Tool) -> Result<rmcp::model::Tool> {
     let Value::Object(schema) = tool.parameters else {
         bail!("tool {} parameters are not a JSON object schema", tool.name);
     };
-    Ok(rmcp::model::Tool::new(tool.name, tool.description, schema))
+    // Every Koharu tool works inside the open project, so none reaches an open world.
+    let annotations = ToolAnnotations::new()
+        .read_only(tool.metadata.group == ToolGroup::Read)
+        .destructive(tool.metadata.destructive)
+        .open_world(false);
+    Ok(rmcp::model::Tool::new(tool.name, tool.description, schema).with_annotations(annotations))
 }
 
 fn result(invocation: Result<Invocation>) -> CallToolResult {
@@ -162,8 +167,43 @@ mod tests {
     }
 
     #[test]
+    fn annotations_follow_tool_metadata() -> Result<()> {
+        let tools = FakeHost::default()
+            .tools()
+            .into_iter()
+            .map(tool)
+            .collect::<Result<Vec<_>>>()?;
+        let annotations = |name: &str| {
+            tools
+                .iter()
+                .find(|tool| tool.name == name)
+                .and_then(|tool| tool.annotations.clone())
+                .expect("every Koharu tool is annotated")
+        };
+
+        let read = annotations("inspect_project");
+        assert_eq!(read.read_only_hint, Some(true));
+        assert_eq!(read.open_world_hint, Some(false));
+        let delete = annotations("delete_pages");
+        assert_eq!(delete.read_only_hint, Some(false));
+        assert_eq!(delete.destructive_hint, Some(true));
+        let edit = annotations("set_translation");
+        assert_eq!(edit.read_only_hint, Some(false));
+        assert_eq!(edit.destructive_hint, Some(false));
+        Ok(())
+    }
+
+    #[test]
     fn non_object_schemas_are_rejected() {
-        assert!(tool(Tool::new("broken", "Broken.", json!(true))).is_err());
+        assert!(
+            tool(Tool::new(
+                "broken",
+                "Broken.",
+                json!(true),
+                crate::mcp::tests::metadata("broken")
+            ))
+            .is_err()
+        );
     }
 
     #[tokio::test]

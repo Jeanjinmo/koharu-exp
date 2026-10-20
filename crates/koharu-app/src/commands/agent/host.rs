@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin, sync::OnceLock};
 use anyhow::{Context as _, Result, anyhow, bail};
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use koharu_agent::{Control, Host, Invocation, Tool, ToolCall};
+use koharu_agent::{Control, Host, Invocation, Tool, ToolCall, ToolGroup, ToolMetadata, Vision};
 use koharu_desktop::{Desktop, Frame};
 use koharu_pipeline::{Committer, Operation, RunStatus, Scope, Stage, StageOutput, StopToken};
 use koharu_scene::{Commit, EntityId, Snapshot};
@@ -203,40 +203,90 @@ impl Host for KoharuHost {
                     definition::<InspectProject>(
                         "inspect_project",
                         "Read the latest complete semantic project state after edits. This does not include page images.",
+                        metadata(ToolGroup::Read),
                     ),
                     definition::<ViewPage>(
                         "view_page",
                         "Render and inspect one page image. Call this only for pages whose visual appearance matters to the request.",
+                        ToolMetadata {
+                            vision: Vision::Required,
+                            ..metadata(ToolGroup::Read)
+                        },
                     ),
-                    definition::<RenamePage>("rename_page", "Rename a project page."),
-                    definition::<MovePage>("move_page", "Move a page to a zero-based project index."),
-                    definition::<DeletePages>("delete_pages", "Delete pages and their contents."),
-                    definition::<AddTextBox>("add_text_box", "Add a paragraph text box to a page."),
-                    definition::<SetText>("set_source_text", "Replace an element's source text."),
+                    definition::<RenamePage>(
+                        "rename_page",
+                        "Rename a project page.",
+                        metadata(ToolGroup::Pages),
+                    ),
+                    definition::<MovePage>(
+                        "move_page",
+                        "Move a page to a zero-based project index.",
+                        metadata(ToolGroup::Pages),
+                    ),
+                    definition::<DeletePages>(
+                        "delete_pages",
+                        "Delete pages and their contents.",
+                        ToolMetadata {
+                            destructive: true,
+                            ..metadata(ToolGroup::Pages)
+                        },
+                    ),
+                    definition::<AddTextBox>(
+                        "add_text_box",
+                        "Add a paragraph text box to a page.",
+                        ToolMetadata {
+                            vision: Vision::Better,
+                            ..metadata(ToolGroup::Text)
+                        },
+                    ),
+                    definition::<SetText>(
+                        "set_source_text",
+                        "Replace an element's source text.",
+                        metadata(ToolGroup::Text),
+                    ),
                     definition::<SetTranslation>(
                         "set_translation",
                         "Set an element's translation, or pass null to remove it.",
+                        metadata(ToolGroup::Text),
                     ),
                     definition::<SetTypography>(
                         "set_typography",
                         "Replace an element's typography settings. Font is a family name from available_fonts.",
+                        metadata(ToolGroup::Text),
                     ),
                     definition::<SetGeometry>(
                         "set_geometry",
                         "Replace an element's page-space polygon geometry.",
+                        ToolMetadata {
+                            vision: Vision::Better,
+                            ..metadata(ToolGroup::Text)
+                        },
                     ),
                     definition::<SetVisibility>(
                         "set_visibility",
                         "Change visibility and/or opacity for elements.",
+                        metadata(ToolGroup::Text),
                     ),
-                    definition::<DeleteElements>("delete_elements", "Delete elements and descendants."),
+                    definition::<DeleteElements>(
+                        "delete_elements",
+                        "Delete elements and descendants.",
+                        ToolMetadata {
+                            destructive: true,
+                            ..metadata(ToolGroup::Text)
+                        },
+                    ),
                     definition::<MoveElement>(
                         "move_element",
                         "Move an element under a page or element at a zero-based index.",
+                        metadata(ToolGroup::Text),
                     ),
                     definition::<RunPipeline>(
                         "run_pipeline",
                         "Run Koharu's configured processing pipeline for the whole project, selected pages, or selected text elements.",
+                        ToolMetadata {
+                            mutates_image: true,
+                            ..metadata(ToolGroup::Pipeline)
+                        },
                     ),
                 ]
             })
@@ -492,12 +542,23 @@ impl Committer for AgentCommitter {
     }
 }
 
-fn definition<T: JsonSchema>(name: &str, description: &str) -> Tool {
+fn definition<T: JsonSchema>(name: &str, description: &str, metadata: ToolMetadata) -> Tool {
     Tool::new(
         name,
         description,
         serde_json::to_value(schema_for!(T)).expect("tool argument schema must serialize"),
+        metadata,
     )
+}
+
+/// Metadata for a tool that only needs text and leaves artwork and content intact.
+fn metadata(group: ToolGroup) -> ToolMetadata {
+    ToolMetadata {
+        group,
+        vision: Vision::None,
+        mutates_image: false,
+        destructive: false,
+    }
 }
 
 fn arguments<T: for<'de> Deserialize<'de>>(call: &ToolCall) -> Result<T> {

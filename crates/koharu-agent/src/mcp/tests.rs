@@ -15,9 +15,9 @@ use serde_json::{Value, json};
 use tokio::sync::Notify;
 
 use super::{Server, Token, write_pointer};
-use crate::{Control, Host, Invocation, Tool, ToolCall};
+use crate::{Control, Host, Invocation, Tool, ToolCall, ToolGroup, ToolMetadata, Vision};
 
-/// The tool names Koharu's desktop host exposes, in order.
+/// A representative subset of the tools Koharu's desktop host exposes, in order.
 pub(super) const TOOLS: [&str; 14] = [
     "inspect_project",
     "view_page",
@@ -62,6 +62,7 @@ impl Host for FakeHost {
                     name,
                     format!("Fake {name}."),
                     json!({ "type": "object", "properties": {} }),
+                    metadata(name),
                 )
             })
             .collect()
@@ -83,6 +84,24 @@ impl Host for FakeHost {
             }
             name => bail!("unknown Koharu tool {name}"),
         }
+    }
+}
+
+pub(super) fn metadata(name: &str) -> ToolMetadata {
+    ToolMetadata {
+        group: match name {
+            "inspect_project" | "view_page" => ToolGroup::Read,
+            "rename_page" | "move_page" | "delete_pages" => ToolGroup::Pages,
+            "run_pipeline" => ToolGroup::Pipeline,
+            _ => ToolGroup::Text,
+        },
+        vision: if name == "view_page" {
+            Vision::Required
+        } else {
+            Vision::None
+        },
+        mutates_image: name == "run_pipeline",
+        destructive: matches!(name, "delete_pages" | "delete_elements"),
     }
 }
 
