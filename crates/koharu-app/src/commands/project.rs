@@ -1660,7 +1660,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn area_masks_paint_exact_colors_on_raster_layers_only() {
+    async fn area_masks_paint_and_erase_raster_layers_only() {
         let (mut project, page, layers) = project_with_text(1).await;
         let white = [255, 255, 255, 255];
 
@@ -1680,6 +1680,33 @@ mod tests {
         assert_eq!(pixels.get_pixel(39, 29).0, white);
         assert_eq!(pixels.get_pixel(40, 29)[3], 0);
         assert_eq!(pixels.get_pixel(10, 30)[3], 0);
+
+        project
+            .apply_raster_mask(
+                page,
+                Some(layer),
+                RasterStrokeMode::Erase,
+                [0; 4],
+                &area_mask(10.0, 20.0, 15.0, 10.0),
+            )
+            .await
+            .unwrap();
+        let pixels = layer_pixels(&project, layer).await;
+        assert_eq!(pixels.get_pixel(10, 20)[3], 0);
+        assert_eq!(pixels.get_pixel(24, 29)[3], 0);
+        assert_eq!(pixels.get_pixel(25, 20).0, white);
+        assert!(
+            project
+                .apply_raster_mask(
+                    page,
+                    None,
+                    RasterStrokeMode::Erase,
+                    [0; 4],
+                    &area_mask(0.0, 0.0, 5.0, 5.0),
+                )
+                .await
+                .is_err()
+        );
         assert!(
             project
                 .apply_raster_mask(

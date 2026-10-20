@@ -600,6 +600,27 @@ impl Host for KoharuHost {
                 .await
             }
             "remove" => self.remove(arguments(&call)?, control).await,
+            "erase" => {
+                let arguments: Erase = arguments(&call)?;
+                let page = entity(&arguments.page)?;
+                let layer = entity(&arguments.layer)?;
+                let mask = self.mask(page, arguments.area).await?;
+                self.mutate(|project| {
+                    Box::pin(async move {
+                        let (commit, layer) = project
+                            .apply_raster_mask(
+                                page,
+                                Some(layer),
+                                RasterStrokeMode::Erase,
+                                [0; 4],
+                                &mask.coverage,
+                            )
+                            .await?;
+                        Ok((commit, json!({ "page": page, "layer": layer })))
+                    })
+                })
+                .await
+            }
             "draw" => {
                 let arguments: Draw = arguments(&call)?;
                 let page = entity(&arguments.page)?;
@@ -828,6 +849,15 @@ fn tools() -> &'static [Tool] {
                         ..metadata(ToolGroup::Image)
                     },
                 ),
+                definition::<Erase>(
+                    "erase",
+                    "Make one area of a paint or cleanup layer transparent, like the Eraser tool. Erasing a cleanup layer reveals the original artwork beneath it, for example to restore a logo that remove or the pipeline covered. Give the area as text elements, a rect, or a brush path.",
+                    ToolMetadata {
+                        vision: Vision::Better,
+                        mutates_image: true,
+                        ..metadata(ToolGroup::Image)
+                    },
+                ),
                 definition::<RunPipeline>(
                     "run_pipeline",
                     "Run Koharu's configured processing pipeline for the whole project, selected pages, or selected text elements.",
@@ -993,6 +1023,15 @@ struct Draw {
     color: String,
     /// Paint or cleanup layer to draw on. Omit it to add a new paint layer.
     layer: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct Erase {
+    page: String,
+    /// Paint or cleanup layer to erase from, as listed by inspect_page.
+    layer: String,
+    #[serde(flatten)]
+    area: AreaArguments,
 }
 
 /// An axis-aligned rectangle in page pixels.
