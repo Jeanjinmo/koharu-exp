@@ -1,21 +1,23 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeSet, path::Path, sync::Arc, time::Duration};
 
 use anyhow::{Context as _, Result, bail};
 use async_trait::async_trait;
 use reqwest::{StatusCode, header};
 use rmcp::{
-    RoleClient, ServiceExt as _,
+    ClientHandler, RoleClient, ServiceExt as _,
     model::{CallToolRequest, CallToolRequestParams, ClientRequest, ContentBlock},
-    service::{PeerRequestOptions, RunningService},
+    service::{NotificationContext, PeerRequestOptions, RunningService},
     transport::{
         StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig,
     },
 };
 use serde_json::{Value, json};
-use tokio::sync::Notify;
+use tokio::sync::{Notify, watch};
 
-use super::{Server, Token, write_pointer};
-use crate::{Control, Host, Invocation, Tool, ToolCall, ToolGroup, ToolMetadata, Vision};
+use super::{Server, ServerStatus, Shared, Supervisor, Token, write_pointer};
+use crate::{
+    Config, Control, Host, Invocation, McpConfig, Tool, ToolCall, ToolGroup, ToolMetadata, Vision,
+};
 
 /// A representative subset of the tools Koharu's desktop host exposes, in order.
 pub(super) const TOOLS: [&str; 14] = [
@@ -105,17 +107,87 @@ pub(super) fn metadata(name: &str) -> ToolMetadata {
     }
 }
 
+fn config(mcp: McpConfig) -> koharu_config::Config<Config> {
+    koharu_config::Config::memory(Config {
+        mcp,
+        ..Config::default()
+    })
+}
+
 async fn start(host: FakeHost) -> Result<(Server, Token)> {
     let token = Token::generate();
-    let server = Server::bind(Arc::new(host), 0, token.clone()).await?;
+    let shared = Arc::new(Shared {
+        host,
+        config: config(McpConfig::default()),
+    });
+    let server = Server::bind(shared, 0, token.clone()).await?;
     Ok((server, token))
 }
 
 async fn connect(server: &Server, token: &Token) -> Result<RunningService<RoleClient, ()>> {
+    connect_as((), &server.url(), token).await
+}
+
+async fn connect_as<C>(client: C, url: &str, token: &Token) -> Result<RunningService<RoleClient, C>>
+where
+    C: ClientHandler,
+{
     let transport = StreamableHttpClientTransport::from_config(
-        StreamableHttpClientTransportConfig::with_uri(server.url()).auth_header(token.expose()),
+        StreamableHttpClientTransportConfig::with_uri(url).auth_header(token.expose()),
     );
-    Ok(().serve(transport).await?)
+    Ok(client.serve(transport).await?)
+}
+
+/// A client that records `notifications/tools/list_changed`.
+#[derive(Clone, Default)]
+struct Listener {
+    tools_changed: Arc<Notify>,
+}
+
+impl ClientHandler for Listener {
+    async fn on_tool_list_changed(&self, _context: NotificationContext<RoleClient>) {
+        self.tools_changed.notify_one();
+    }
+}
+
+fn supervise(
+    host: FakeHost,
+    mcp: McpConfig,
+    pointer: &Path,
+) -> Result<(Supervisor<FakeHost>, Token)> {
+    let token = Token::generate();
+    let supervisor = Supervisor::for_test(host, config(mcp), token.clone(), pointer.to_owned())?;
+    Ok((supervisor, token))
+}
+
+async fn reaches(
+    status: &mut watch::Receiver<ServerStatus>,
+    expected: impl Fn(&ServerStatus) -> bool,
+) -> Result<ServerStatus> {
+    let status = tokio::time::timeout(Duration::from_secs(10), status.wait_for(expected))
+        .await
+        .context("the MCP server did not reach the expected status")??;
+    Ok(status.clone())
+}
+
+fn running_url(status: &ServerStatus) -> Option<&str> {
+    match status {
+        ServerStatus::Running { url, .. } => Some(url),
+        _ => None,
+    }
+}
+
+fn text_of(content: &[ContentBlock]) -> Option<&str> {
+    content
+        .first()
+        .and_then(|block| block.as_text())
+        .map(|text| text.text.as_str())
+}
+
+fn free_port() -> Result<u16> {
+    Ok(std::net::TcpListener::bind("127.0.0.1:0")?
+        .local_addr()?
+        .port())
 }
 
 async fn initialize(url: &str, headers: &[(&str, &str)]) -> Result<reqwest::Response> {
@@ -276,6 +348,187 @@ async fn other_paths_are_not_served() -> Result<()> {
 
     let response = initialize(&url, &[("authorization", &authorization)]).await?;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    Ok(())
+}
+
+#[tokio::test]
+async fn disabled_tools_are_hidden_refused_and_announced() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let (supervisor, token) = supervise(
+        FakeHost::default(),
+        McpConfig {
+            port: 0,
+            ..McpConfig::default()
+        },
+        &directory.path().join("mcp.json"),
+    )?;
+    let running = reaches(&mut supervisor.status(), |status| {
+        running_url(status).is_some()
+    })
+    .await?;
+    let listener = Listener::default();
+    let client = connect_as(
+        listener.clone(),
+        running_url(&running).context("url")?,
+        &token,
+    )
+    .await?;
+    assert_eq!(client.list_all_tools().await?.len(), TOOLS.len());
+
+    supervisor.set_disabled_tools(BTreeSet::from(["view_page".to_owned()]))?;
+    tokio::time::timeout(Duration::from_secs(10), listener.tools_changed.notified())
+        .await
+        .context("the client was not told that the tools changed")?;
+
+    let tools = client.list_all_tools().await?;
+    assert_eq!(tools.len(), TOOLS.len() - 1);
+    assert!(tools.iter().all(|tool| tool.name != "view_page"));
+    let refused = client
+        .call_tool(CallToolRequestParams::new("view_page"))
+        .await?;
+    assert_eq!(refused.is_error, Some(true));
+    assert_eq!(
+        text_of(&refused.content),
+        Some("Tool `view_page` is disabled in Koharu settings")
+    );
+    client.cancel().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn stopping_waits_for_running_calls_and_stop_now_cancels_them() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let pointer = directory.path().join("mcp.json");
+    let host = FakeHost::default();
+    let (started, cancelled) = (host.started.clone(), host.cancelled.clone());
+    let (supervisor, token) = supervise(
+        host,
+        McpConfig {
+            port: 0,
+            ..McpConfig::default()
+        },
+        &pointer,
+    )?;
+    let mut status = supervisor.status();
+    let running = reaches(&mut status, |status| running_url(status).is_some()).await?;
+    let url = running_url(&running).context("url")?.to_owned();
+    let client = connect_as((), &url, &token).await?;
+    let pipeline = client
+        .send_cancellable_request(
+            ClientRequest::from(CallToolRequest::new(CallToolRequestParams::new(
+                "run_pipeline",
+            ))),
+            PeerRequestOptions::no_options(),
+        )
+        .await?;
+    tokio::time::timeout(Duration::from_secs(5), started.notified()).await?;
+
+    supervisor.set_enabled(false)?;
+    reaches(&mut status, |status| {
+        *status == ServerStatus::Stopping { tasks: 1 }
+    })
+    .await?;
+    let refused = client
+        .call_tool(CallToolRequestParams::new("inspect_project"))
+        .await?;
+    assert_eq!(refused.is_error, Some(true));
+    assert!(text_of(&refused.content).is_some_and(|text| text.contains("stopping")));
+
+    supervisor.stop_now();
+    tokio::time::timeout(Duration::from_secs(5), cancelled.notified()).await?;
+    drop(pipeline);
+    reaches(&mut status, |status| *status == ServerStatus::Off).await?;
+    eventually(|| async { initialize(&url, &[]).await.is_err() })
+        .await
+        .context("the port stays open")?;
+
+    supervisor.set_enabled(true)?;
+    let restarted = reaches(&mut status, |status| running_url(status).is_some()).await?;
+    let pointer: Value = serde_json::from_slice(&std::fs::read(&pointer)?)?;
+    assert_eq!(pointer["token"], json!(token.expose()));
+    assert_eq!(
+        pointer["url"],
+        json!(running_url(&restarted).context("url")?)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn busy_ports_fail_until_a_retry_succeeds() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let occupant = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let port = occupant.local_addr()?.port();
+    let (supervisor, _token) = supervise(
+        FakeHost::default(),
+        McpConfig {
+            port,
+            ..McpConfig::default()
+        },
+        &directory.path().join("mcp.json"),
+    )?;
+    let mut status = supervisor.status();
+    let failed = reaches(&mut status, |status| {
+        matches!(status, ServerStatus::Failed { .. })
+    })
+    .await?;
+    assert!(
+        matches!(&failed, ServerStatus::Failed { message } if message.contains(&port.to_string())),
+        "{failed:?}"
+    );
+
+    drop(occupant);
+    supervisor.set_enabled(true)?;
+    let running = reaches(&mut status, |status| running_url(status).is_some()).await?;
+    assert_eq!(
+        running_url(&running),
+        Some(format!("http://127.0.0.1:{port}/mcp").as_str())
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn rapid_requests_settle_on_the_last_one_with_one_server() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let port = free_port()?;
+    let (supervisor, token) = supervise(
+        FakeHost::default(),
+        McpConfig {
+            port,
+            ..McpConfig::default()
+        },
+        &directory.path().join("mcp.json"),
+    )?;
+    for enabled in [false, true, false, true, false, true] {
+        supervisor.set_enabled(enabled)?;
+    }
+    // A second server could not bind the same port, so the last request
+    // ending in a reachable server shows the transitions never overlapped.
+    let url = format!("http://127.0.0.1:{port}/mcp");
+    let authorization = format!("Bearer {}", token.expose());
+    let status = supervisor.status();
+    eventually(|| async {
+        let running = running_url(&status.borrow()) == Some(url.as_str());
+        running
+            && initialize(&url, &[("authorization", &authorization)])
+                .await
+                .is_ok_and(|response| response.status() == StatusCode::OK)
+    })
+    .await
+    .context("the last request did not leave one reachable server")?;
+    Ok(())
+}
+
+async fn eventually<F, Check>(check: Check) -> Result<()>
+where
+    Check: Fn() -> F,
+    F: Future<Output = bool>,
+{
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !check().await {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await?;
     Ok(())
 }
 

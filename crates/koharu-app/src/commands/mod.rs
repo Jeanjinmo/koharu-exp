@@ -5,6 +5,7 @@ pub(crate) mod editing;
 pub(crate) mod fonts;
 pub(crate) mod import;
 pub(crate) mod lifecycle;
+pub(crate) mod mcp;
 pub(crate) mod output;
 pub(crate) mod preferences;
 pub(crate) mod processing;
@@ -64,6 +65,12 @@ pub fn bindings() -> tauri_specta::Builder<tauri_runtime_cef::CefRuntime> {
             agent::save_agent_config,
             agent::run_agent,
             agent::cancel_agent,
+            mcp::get_mcp_settings,
+            mcp::set_mcp_enabled,
+            mcp::set_mcp_tools,
+            mcp::choose_mcp_export_folder,
+            mcp::reset_mcp_export_folder,
+            mcp::stop_mcp_now,
             lifecycle::subscribe,
             lifecycle::get_project,
             lifecycle::get_pages,

@@ -14,6 +14,7 @@ import { pageKey, pagesKey, projectKey, queryClient, refresh } from '@/lib/queri
 import {
   receiveCanvas,
   receiveDownload,
+  receiveMcpEvent,
   receiveStartupState,
   receiveJob,
   receiveResources,
@@ -24,6 +25,7 @@ import {
   type CanvasState,
   type Download,
   type Job,
+  type McpEvent,
   type ModelResources,
   type ProjectInfo,
 } from '@koharu/bridge/protocol'
@@ -74,6 +76,7 @@ export function Providers({ children }: { children: ReactNode }) {
               queryClient.setQueryData(pageKey, null)
             }
           }),
+          channel<McpEvent>(receiveMcpEvent),
         )
         .then((state) => {
           if (lifecycle.active) receiveStartupState(state)

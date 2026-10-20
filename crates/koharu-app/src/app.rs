@@ -10,6 +10,7 @@ use crate::commands::{
         Download, DownloadChannel, DownloadState, Initialization, ModelResources, ProjectChannel,
         ResourceChannel,
     },
+    mcp::{McpChannel, McpState},
     processing::{JobChannel, Processing},
     project::{CurrentProject, ProjectLibrary},
 };
@@ -133,6 +134,8 @@ pub fn run(context: tauri::Context<CefRuntime>) -> Result<()> {
             application.manage(DownloadChannel::default());
             application.manage(ResourceChannel::default());
             application.manage(ProjectChannel::default());
+            application.manage(McpChannel::default());
+            application.manage(McpState::default());
             application.manage(Initialization::default());
 
             let handle = application.handle().clone();
@@ -158,14 +161,14 @@ pub fn run(context: tauri::Context<CefRuntime>) -> Result<()> {
                 initialize(initialization_handle.clone())
                     .await
                     .expect("failed to initialize the desktop runtime");
-                initialization_handle.state::<Initialization>().ready();
+                // Supervised before the UI subscribes, so its first status is known.
                 if let Err(error) = initialization_handle
-                    .state::<AgentState>()
-                    .start_mcp(initialization_handle.clone())
-                    .await
+                    .state::<McpState>()
+                    .start(initialization_handle.clone())
                 {
                     tracing::error!("the MCP server is unavailable: {error:#}");
                 }
+                initialization_handle.state::<Initialization>().ready();
             }));
 
             let mut downloads = koharu_runtime::download::subscribe();
@@ -274,9 +277,8 @@ pub fn run(context: tauri::Context<CefRuntime>) -> Result<()> {
                 }
                 processing.stops.lock().clear();
                 processing.jobs.lock().clear();
-                let agent = window.state::<AgentState>();
-                agent.cancel_all();
-                agent.stop_mcp();
+                window.state::<AgentState>().cancel_all();
+                window.state::<McpState>().shutdown();
             }
             if matches!(event, WindowEvent::Destroyed) {
                 tracing::info!(

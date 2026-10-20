@@ -4,7 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context as _, Result, anyhow};
 use koharu_agent::{
-    Account, Agent, Codex, CodexModel, Config, Control, Event, LoginEvent, RunId, mcp,
+    Account, Agent, Codex, CodexModel, Config, Control, Event, LoginEvent, Reasoning, RunId,
 };
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -13,7 +13,7 @@ use tauri::{AppHandle, Manager as _, State, ipc::Channel};
 use tauri_runtime_cef::CefRuntime;
 use tokio::sync::Notify;
 
-use self::host::KoharuHost;
+pub(crate) use self::host::KoharuHost;
 use super::Error;
 
 #[derive(Clone, Debug, Serialize, Type)]
@@ -29,7 +29,6 @@ pub(crate) struct AgentState {
     runs: Mutex<HashMap<RunId, Control>>,
     login: Mutex<Option<Control>>,
     idle: Notify,
-    mcp: Mutex<Option<mcp::Server>>,
 }
 
 impl AgentState {
@@ -39,21 +38,7 @@ impl AgentState {
             runs: Mutex::new(HashMap::new()),
             login: Mutex::new(None),
             idle: Notify::new(),
-            mcp: Mutex::new(None),
         })
-    }
-
-    /// Exposes the agent tools to external MCP clients. Call this only after
-    /// the desktop runtime is initialized, because tools such as `run_pipeline`
-    /// depend on state managed during initialization.
-    pub(crate) async fn start_mcp(&self, handle: AppHandle<CefRuntime>) -> Result<()> {
-        let server = mcp::serve(KoharuHost::new(handle), self.agent.config()?.mcp).await?;
-        *self.mcp.lock() = Some(server);
-        Ok(())
-    }
-
-    pub(crate) fn stop_mcp(&self) {
-        self.mcp.lock().take();
     }
 
     async fn status(&self) -> Result<AgentStatus> {
@@ -172,6 +157,8 @@ pub(crate) async fn logout_agent(
     Ok(state.status().await?)
 }
 
+/// Saves the in-app agent's model choice. MCP settings are saved separately so
+/// neither screen can overwrite the other's changes.
 #[tracing::instrument(
     target = "koharu_metrics",
     name = "preferences_saved",
@@ -181,10 +168,14 @@ pub(crate) async fn logout_agent(
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn save_agent_config(
-    config: Config,
+    model: Option<String>,
+    reasoning: Reasoning,
     state: State<'_, AgentState>,
 ) -> std::result::Result<Config, Error> {
-    let config = state.agent.save_config(config)?;
+    let config = state.agent.update_config(|config| {
+        config.model = model;
+        config.reasoning = reasoning;
+    })?;
     tracing::info!(
         target: "koharu_metrics",
         metric = "preference_changed",

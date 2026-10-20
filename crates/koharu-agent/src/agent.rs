@@ -134,9 +134,10 @@ where
         self.codex.models().await
     }
 
-    pub fn save_config(&self, config: Config) -> Result<Config> {
+    /// Applies `update` to the live configuration and saves the result.
+    pub fn update_config(&self, update: impl FnOnce(&mut Config)) -> Result<Config> {
         let mut current = self.config.write()?;
-        *current = config;
+        update(&mut current);
         let saved = current.clone();
         current.save()?;
         Ok(saved)

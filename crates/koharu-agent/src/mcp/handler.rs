@@ -5,12 +5,14 @@ use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-        ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, ToolAnnotations,
+        ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig,
+        SubscriptionFilter, ToolAnnotations,
     },
-    service::RequestContext,
+    service::{NotificationContext, RequestContext, SubscriptionContext},
 };
 use serde_json::Value;
 
+use super::{Calls, Clients, Shared};
 use crate::{Control, Host, Invocation, Tool, ToolCall, ToolGroup, ToolImage};
 
 // Host-neutral counterpart of the in-app agent instructions. MCP clients receive no
@@ -23,12 +25,18 @@ Do not invent entity identifiers. Preserve artwork and existing authored content
 
 /// Serves one MCP session by forwarding tool requests to the shared [`Host`].
 pub(super) struct Handler<H> {
-    host: Arc<H>,
+    shared: Arc<Shared<H>>,
+    calls: Arc<Calls>,
+    clients: Arc<Clients>,
 }
 
 impl<H> Handler<H> {
-    pub(super) fn new(host: Arc<H>) -> Self {
-        Self { host }
+    pub(super) fn new(shared: Arc<Shared<H>>, calls: Arc<Calls>, clients: Arc<Clients>) -> Self {
+        Self {
+            shared,
+            calls,
+            clients,
+        }
     }
 }
 
@@ -37,11 +45,16 @@ where
     H: Host,
 {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(
-                Implementation::new("koharu", env!("CARGO_PKG_VERSION")).with_title("Koharu"),
-            )
-            .with_instructions(INSTRUCTIONS)
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .build(),
+        )
+        .with_server_info(
+            Implementation::new("koharu", env!("CARGO_PKG_VERSION")).with_title("Koharu"),
+        )
+        .with_instructions(INSTRUCTIONS)
     }
 
     async fn list_tools(
@@ -50,11 +63,9 @@ where
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         let tools = self
-            .host
-            .tools()
-            .into_iter()
-            .map(tool)
-            .collect::<Result<Vec<_>>>()
+            .shared
+            .enabled_tools()
+            .and_then(|tools| tools.into_iter().map(tool).collect::<Result<Vec<_>>>())
             .map_err(|error| ErrorData::internal_error(format!("{error:#}"), None))?;
         Ok(ListToolsResult::with_all_items(tools))
     }
@@ -69,8 +80,23 @@ where
             name: request.name.into_owned(),
             arguments: Value::Object(request.arguments.unwrap_or_default()).to_string(),
         };
+        let disabled = self
+            .shared
+            .disables(&call.name)
+            .map_err(|error| ErrorData::internal_error(format!("{error:#}"), None))?;
+        if disabled {
+            return Ok(refusal(format!(
+                "Tool `{}` is disabled in Koharu settings",
+                call.name
+            )));
+        }
         let control = Control::default();
-        let mut invocation = self.host.invoke(call, &control);
+        let Some(_call) = self.calls.begin(control.clone()) else {
+            return Ok(refusal(
+                "Koharu's MCP server is stopping and accepts no new tool calls".to_owned(),
+            ));
+        };
+        let mut invocation = self.shared.host.invoke(call, &control);
         // A cancelled MCP request stops the host through the same control as an
         // in-app agent run; the invocation still finishes so it can clean up.
         let invocation = tokio::select! {
@@ -82,6 +108,27 @@ where
         };
         Ok(result(invocation).into())
     }
+
+    async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
+        self.clients.add_session(context.peer);
+    }
+
+    fn accepted_subscription_filter(
+        &self,
+        _requested: &SubscriptionFilter,
+    ) -> Option<SubscriptionFilter> {
+        Some(SubscriptionFilter::builder().tools_list_changed().build())
+    }
+
+    async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
+        let _subscription = self.clients.subscribe(context.sink().clone());
+        context.cancelled().await;
+        Ok(())
+    }
+}
+
+fn refusal(message: String) -> CallToolResponse {
+    CallToolResult::error(vec![ContentBlock::text(message)]).into()
 }
 
 fn tool(tool: Tool) -> Result<rmcp::model::Tool> {

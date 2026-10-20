@@ -74,6 +74,7 @@ const startupState = (): StartupState => ({
     size: [0, 0],
     element_frames: [],
   },
+  mcp: { state: 'running', url: 'http://127.0.0.1:47821/mcp', clients: 0 },
 })
 
 async function start() {
@@ -171,6 +172,21 @@ describe('Tauri runtime', () => {
       process_cpu: 5,
       devices: [{ memory_used: 4096 }],
     })
+    dispose()
+  })
+
+  it('tracks the MCP server status from startup and live events', async () => {
+    const { binding, dispose } = await start()
+    expect(useKoharuStore.getState().mcpStatus).toEqual({
+      state: 'running',
+      url: 'http://127.0.0.1:47821/mcp',
+      clients: 0,
+    })
+    const mcpChannel = binding.mock.calls[0][5]
+
+    act(() => mcpChannel.onmessage({ type: 'status', status: { state: 'stopping', tasks: 2 } }))
+
+    expect(useKoharuStore.getState().mcpStatus).toEqual({ state: 'stopping', tasks: 2 })
     dispose()
   })
 

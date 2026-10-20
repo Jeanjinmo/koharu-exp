@@ -379,6 +379,41 @@
       "visionDescription": "Feed page images to the LLM during translation."
     },
     "loading": "Loading preferences…",
+    "mcp": {
+      "chooseFolder": "Choose…",
+      "defaultFolder": "Use the default folder",
+      "description": "Let external agents such as Claude Code, Grok Build, or Hermes work on the open project through Koharu's MCP server. These settings do not affect the built-in agent.",
+      "enable": "MCP server",
+      "exportFolder": "Export folder",
+      "exportFolderDescription": "Where the export tool writes. Every export gets a new folder, and agents cannot choose another location.",
+      "groups": {
+        "image": "Image",
+        "output": "Output",
+        "pages": "Pages",
+        "pipeline": "Pipeline",
+        "read": "Read",
+        "text": "Text"
+      },
+      "retry": "Retry",
+      "server": "Server",
+      "serverDescription": "Clients connect with the URL and token that Koharu writes to ~/.koharu/mcp.json. The port and token stay the same when the server restarts.",
+      "status": {
+        "failed": "Error: {{message}}",
+        "off": "Off",
+        "running": "Running at {{address}}",
+        "runningWithClients": "Running at {{address}} · {{count}} clients",
+        "runningWithClients_one": "Running at {{address}} · {{count}} client",
+        "runningWithClients_other": "Running at {{address}} · {{count}} clients",
+        "starting": "Starting…",
+        "stopping": "Stopping… (waiting for {{count}} tasks)",
+        "stopping_one": "Stopping… (waiting for {{count}} task)",
+        "stopping_other": "Stopping… (waiting for {{count}} tasks)"
+      },
+      "stopNow": "Stop now",
+      "title": "MCP Tools",
+      "tools": "Tools",
+      "toolsDescription": "Clients can only see and call checked tools. Connected clients are told when this list changes."
+    },
     "pipeline": {
       "description": "Choose the models and options used to process each page.",
       "modelLabel": "{{stage}} model",
@@ -425,6 +460,7 @@
     },
     "tabs": {
       "appearance": "Appearance",
+      "mcp": "MCP Tools",
       "pipeline": "Pipeline",
       "providers": "Providers",
       "shortcuts": "Shortcuts",

@@ -7,9 +7,11 @@ import type {
   Download,
   EntityId,
   Job,
+  McpEvent,
   Model,
   Frame,
   Preferences,
+  ServerStatus,
   Stage,
   StartupState,
   ModelResources,
@@ -41,6 +43,7 @@ interface KoharuStore {
   resources: ModelResources | null
   jobs: Record<string, Job>
   downloads: Record<string, Download>
+  mcpStatus: ServerStatus
   camera: { zoom: number; translation: [number, number]; fitted: boolean }
   canvasPage: EntityId | null
   canvasRevision: number | null
@@ -89,6 +92,7 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   resources: null,
   jobs: {},
   downloads: {},
+  mcpStatus: { state: 'off' },
   camera: { zoom: 1, translation: [0, 0], fitted: true },
   canvasPage: null,
   canvasRevision: null,
@@ -137,8 +141,17 @@ export function receiveStartupState(state: StartupState): void {
     initialized: true,
     preferences: state.preferences,
     jobs: byId(state.jobs),
+    mcpStatus: state.mcp,
     ...canvasSnapshot(state.canvas),
   })
+}
+
+export function receiveMcpEvent(event: McpEvent): void {
+  switch (event.type) {
+    case 'status':
+      useKoharuStore.setState({ mcpStatus: event.status })
+      break
+  }
 }
 
 export function receiveCanvas(canvas: CanvasState): void {

@@ -1,8 +1,10 @@
-use std::path::PathBuf;
+use std::{collections::BTreeSet, path::PathBuf};
 
 use anyhow::{Context as _, Result};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+
+use crate::Tool;
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, Type)]
 pub struct Config {
@@ -42,11 +44,17 @@ impl Reasoning {
     }
 }
 
-/// Settings for the agent tools served over MCP.
+/// Settings for the agent tools served over MCP. Koharu's configuration loader
+/// merges saved values over [`McpConfig::default`], so configurations saved
+/// before a field existed still load.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Type)]
 pub struct McpConfig {
-    /// Loopback port, read once when the server starts.
+    /// Whether Koharu serves MCP at all.
+    pub enabled: bool,
+    /// Loopback port, read whenever the server starts.
     pub port: u16,
+    /// Tools that MCP clients can neither list nor call.
+    pub disabled_tools: BTreeSet<String>,
     /// Folder that receives agent exports; `None` uses `Documents/Koharu/exports`.
     pub export_dir: Option<PathBuf>,
 }
@@ -61,12 +69,20 @@ impl McpConfig {
                 .join("exports")),
         }
     }
+
+    /// Whether MCP clients may list and call `tool`.
+    #[must_use]
+    pub fn enables(&self, tool: &Tool) -> bool {
+        !self.disabled_tools.contains(&tool.name)
+    }
 }
 
 impl Default for McpConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             port: 47821,
+            disabled_tools: BTreeSet::new(),
             export_dir: None,
         }
     }
@@ -77,13 +93,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn configs_without_new_mcp_fields_keep_their_defaults() {
-        let config: Config = toml::from_str("reasoning = \"high\"\n[mcp]\nport = 5000\n").unwrap();
+    fn mcp_defaults_serve_every_tool_on_the_documented_port() {
+        let defaults = McpConfig::default();
 
-        assert_eq!(config.mcp.port, 5000);
-        assert_eq!(config.mcp.export_dir, None);
-        let defaults = toml::Value::try_from(Config::default()).unwrap();
-        assert_eq!(defaults.try_into::<Config>().unwrap(), Config::default());
+        assert!(defaults.enabled);
+        assert_eq!(defaults.port, 47821);
+        assert!(defaults.disabled_tools.is_empty());
+        assert_eq!(defaults.export_dir, None);
+        let saved = toml::Value::try_from(Config::default()).unwrap();
+        assert_eq!(saved.try_into::<Config>().unwrap(), Config::default());
     }
 
     #[test]

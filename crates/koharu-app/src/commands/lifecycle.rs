@@ -14,6 +14,7 @@ use super::{
     agent::AgentState,
     canvas::CanvasChannel,
     import,
+    mcp::{McpChannel, McpEvent, McpState},
     preferences::Preferences,
     processing::{Job, JobChannel, Processing},
     project::{
@@ -26,6 +27,7 @@ pub struct StartupState {
     pub preferences: Preferences,
     pub jobs: Vec<Job>,
     pub canvas: CanvasState,
+    pub mcp: koharu_agent::mcp::ServerStatus,
 }
 
 #[derive(Clone, Debug, Serialize, Type)]
@@ -156,6 +158,7 @@ pub(crate) async fn subscribe(
     on_download: Channel<Download>,
     on_resources: Channel<ModelResources>,
     on_project: Channel<Option<ProjectInfo>>,
+    on_mcp: Channel<McpEvent>,
 ) -> std::result::Result<StartupState, Error> {
     handle.state::<Initialization>().wait().await?;
 
@@ -164,6 +167,7 @@ pub(crate) async fn subscribe(
     *handle.state::<DownloadChannel>().channel.lock() = Some(on_download);
     *handle.state::<ResourceChannel>().channel.lock() = Some(on_resources);
     *handle.state::<ProjectChannel>().channel.lock() = Some(on_project);
+    *handle.state::<McpChannel>().channel.lock() = Some(on_mcp);
 
     let canvas = handle.state::<Desktop>().canvas_state();
     let preferences = Preferences::load()?;
@@ -177,6 +181,7 @@ pub(crate) async fn subscribe(
             .cloned()
             .collect(),
         canvas,
+        mcp: handle.state::<McpState>().status(),
     })
 }
 

@@ -9,7 +9,6 @@ import { call } from '@/lib/backend'
 import {
   commands,
   type AgentStatus,
-  type Config,
   type Event,
   type LoginEvent,
   type Reasoning,
@@ -125,11 +124,7 @@ export function AgentPanel() {
                 !selected.reasoning.includes(status.config.reasoning)
                   ? selected.reasoning[0]
                   : status.config.reasoning
-              void saveConfig({
-                ...status.config,
-                model: model === 'automatic' ? null : model,
-                reasoning,
-              })
+              void saveConfig(model === 'automatic' ? null : model, reasoning)
             }}
           >
             <SelectTrigger size='sm' className='w-full min-w-0' aria-label={t('agent.model')}>
@@ -147,7 +142,7 @@ export function AgentPanel() {
           <Select
             value={status.config.reasoning}
             onValueChange={(reasoning) =>
-              void saveConfig({ ...status.config, reasoning: reasoning as Reasoning })
+              void saveConfig(status.config.model, reasoning as Reasoning)
             }
           >
             <SelectTrigger size='sm' className='w-full min-w-0' aria-label={t('agent.reasoning')}>
@@ -270,8 +265,8 @@ export function AgentPanel() {
     setActivity(null)
   }
 
-  async function saveConfig(config: Config) {
-    const saved = await call(commands.saveAgentConfig, config)
+  async function saveConfig(model: string | null, reasoning: Reasoning) {
+    const saved = await call(commands.saveAgentConfig, model, reasoning)
     setStatus((current) => (current ? { ...current, config: saved } : current))
   }
 

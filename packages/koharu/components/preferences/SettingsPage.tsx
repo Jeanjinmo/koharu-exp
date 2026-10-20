@@ -9,6 +9,7 @@ import {
   Monitor,
   Moon,
   Palette,
+  Plug,
   Sun,
   Type,
 } from 'lucide-react'
@@ -16,6 +17,7 @@ import { useTheme } from 'next-themes'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { McpPreferences } from '@/components/preferences/McpPreferences'
 import { PipelinePreferences } from '@/components/preferences/PipelinePreferences'
 import {
   PreferencePage,
@@ -52,6 +54,7 @@ const tabs = [
   ['translation', Languages],
   ['typesetting', Type],
   ['shortcuts', Keyboard],
+  ['mcp', Plug],
 ] as const
 type Tab = (typeof tabs)[number][0]
 
@@ -231,6 +234,7 @@ export function SettingsPage() {
                 <LoadingPreferences />
               ))}
             {tab === 'shortcuts' && <ShortcutPreferences />}
+            {tab === 'mcp' && <McpPreferences />}
           </div>
         </ScrollArea>
       </main>

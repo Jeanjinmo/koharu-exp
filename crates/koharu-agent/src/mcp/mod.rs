@@ -1,7 +1,10 @@
 //! Loopback Model Context Protocol server that exposes a [`Host`]'s tools to
 //! external agents over Streamable HTTP.
 
+mod calls;
+mod clients;
 mod handler;
+mod supervisor;
 #[cfg(test)]
 mod tests;
 mod token;
@@ -36,42 +39,59 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{Host, McpConfig};
+use crate::{Config, Host, Tool};
 
-use self::{handler::Handler, token::Token};
+pub use self::supervisor::{ServerStatus, Supervisor};
+use self::{calls::Calls, clients::Clients, handler::Handler, token::Token};
 
 const PATH: &str = "/mcp";
 const POINTER: &str = "mcp.json";
 
 type Body = BoxBody<Bytes, Infallible>;
 
-/// A running MCP server. Dropping it stops accepting connections and closes
-/// every open MCP session.
-pub struct Server {
-    address: SocketAddr,
-    shutdown: CancellationToken,
+/// What every MCP session of one Koharu process works with.
+struct Shared<H> {
+    host: H,
+    config: koharu_config::Config<Config>,
 }
 
-/// Start the MCP server for `host` and record its URL and token in
-/// `~/.koharu/mcp.json` so a client can be registered without extra UI.
-pub async fn serve<H>(host: H, config: McpConfig) -> Result<Server>
+impl<H> Shared<H>
 where
     H: Host,
 {
-    let token = Token::load_or_create()?;
-    let server = Server::bind(Arc::new(host), config.port, token.clone()).await?;
-    let pointer = koharu_config::path()?.with_file_name(POINTER);
-    write_pointer(&pointer, &server.url(), &token)?;
-    tracing::info!(
-        url = %server.url(),
-        pointer = %pointer.display(),
-        "MCP server is listening",
-    );
-    Ok(server)
+    /// The host tools that MCP clients may list and call.
+    fn enabled_tools(&self) -> Result<Vec<Tool>> {
+        let config = self.config.read()?;
+        Ok(self
+            .host
+            .tools()
+            .into_iter()
+            .filter(|tool| config.mcp.enables(tool))
+            .collect())
+    }
+
+    /// Whether the host offers `name` but Koharu's settings disable it.
+    fn disables(&self, name: &str) -> Result<bool> {
+        let config = self.config.read()?;
+        Ok(self
+            .host
+            .tools()
+            .iter()
+            .any(|tool| tool.name == name && !config.mcp.enables(tool)))
+    }
+}
+
+/// A running MCP server. Dropping it stops accepting connections and closes
+/// every open MCP session.
+struct Server {
+    address: SocketAddr,
+    shutdown: CancellationToken,
+    calls: Arc<Calls>,
+    clients: Arc<Clients>,
 }
 
 impl Server {
-    async fn bind<H>(host: Arc<H>, port: u16, token: Token) -> Result<Self>
+    async fn bind<H>(shared: Arc<Shared<H>>, port: u16, token: Token) -> Result<Self>
     where
         H: Host,
     {
@@ -81,12 +101,16 @@ impl Server {
         })?;
         let address = listener.local_addr()?;
         let shutdown = CancellationToken::new();
+        let (calls, clients) = (Calls::new(), Clients::new());
         let config = StreamableHttpServerConfig::default()
             .with_allowed_hosts(["127.0.0.1", "localhost"])
             .enforce_origin_validation()
             .with_cancellation_token(shutdown.child_token());
         let service = StreamableHttpService::new(
-            move || Ok(Handler::new(host.clone())),
+            {
+                let (shared, calls, clients) = (shared.clone(), calls.clone(), clients.clone());
+                move || Ok(Handler::new(shared.clone(), calls.clone(), clients.clone()))
+            },
             Arc::default(),
             config,
         );
@@ -95,11 +119,20 @@ impl Server {
             Arc::new(Endpoint { service, token }),
             shutdown.clone(),
         )));
-        Ok(Self { address, shutdown })
+        drop(tokio::spawn(announce_tool_changes(
+            shared,
+            clients.clone(),
+            shutdown.clone(),
+        )));
+        Ok(Self {
+            address,
+            shutdown,
+            calls,
+            clients,
+        })
     }
 
-    #[must_use]
-    pub fn url(&self) -> String {
+    fn url(&self) -> String {
         format!("http://{}{PATH}", self.address)
     }
 }
@@ -107,6 +140,38 @@ impl Server {
 impl Drop for Server {
     fn drop(&mut self) {
         self.shutdown.cancel();
+    }
+}
+
+/// Tells connected clients when the tools they may use change, so clients
+/// that honor `notifications/tools/list_changed` refresh their tool list.
+async fn announce_tool_changes<H>(
+    shared: Arc<Shared<H>>,
+    clients: Arc<Clients>,
+    shutdown: CancellationToken,
+) where
+    H: Host,
+{
+    let names = || {
+        shared
+            .enabled_tools()
+            .map(|tools| tools.into_iter().map(|tool| tool.name).collect::<Vec<_>>())
+            .ok()
+    };
+    let mut revisions = shared.config.subscribe();
+    let mut announced = names();
+    loop {
+        tokio::select! {
+            () = shutdown.cancelled() => return,
+            changed = revisions.changed() => if changed.is_err() {
+                return;
+            },
+        }
+        let current = names();
+        if current != announced {
+            announced = current;
+            clients.announce_tool_list_change().await;
+        }
     }
 }
 

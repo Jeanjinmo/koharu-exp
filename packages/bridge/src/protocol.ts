@@ -9,16 +9,28 @@ export const commands = {
 	getAgentStatus: () => __TAURI_INVOKE<AgentStatus>("get_agent_status"),
 	loginAgent: (onEvent: Channel<LoginEvent>) => __TAURI_INVOKE<AgentStatus>("login_agent", { onEvent }),
 	logoutAgent: () => __TAURI_INVOKE<AgentStatus>("logout_agent"),
-	saveAgentConfig: (config: Config) => __TAURI_INVOKE<Config>("save_agent_config", { config }),
+	/**
+	 *  Saves the in-app agent's model choice. MCP settings are saved separately so
+	 *  neither screen can overwrite the other's changes.
+	 */
+	saveAgentConfig: (model: string | null, reasoning: Reasoning) => __TAURI_INVOKE<Config>("save_agent_config", { model, reasoning }),
 	runAgent: (prompt: string, onEvent: Channel<Event>) => __TAURI_INVOKE<RunId>("run_agent", { prompt, onEvent }),
 	cancelAgent: (run: RunId) => __TAURI_INVOKE<null>("cancel_agent", { run }),
+	getMcpSettings: () => __TAURI_INVOKE<McpSettings>("get_mcp_settings"),
+	/**  Starts or stops the server. Enabling also retries a server that failed. */
+	setMcpEnabled: (enabled: boolean) => __TAURI_INVOKE<McpSettings>("set_mcp_enabled", { enabled }),
+	setMcpTools: (disabledTools: string[]) => __TAURI_INVOKE<McpSettings>("set_mcp_tools", { disabledTools }),
+	chooseMcpExportFolder: () => __TAURI_INVOKE<McpSettings>("choose_mcp_export_folder"),
+	resetMcpExportFolder: () => __TAURI_INVOKE<McpSettings>("reset_mcp_export_folder"),
+	/**  Cancels the tool calls that a stopping server is still waiting for. */
+	stopMcpNow: () => __TAURI_INVOKE<null>("stop_mcp_now"),
 	subscribe: (onCanvas: Channel<CanvasState>, onJob: Channel<Job>, onDownload: Channel<Download>, onResources: Channel<ModelResources>, onProject: Channel<{
 	name: string,
 	revision: Revision,
 	active_page: EntityId | null,
 	can_undo: boolean,
 	can_redo: boolean,
-} | null>) => __TAURI_INVOKE<StartupState>("subscribe", { onCanvas: mapChannel(onCanvas, (v) => ({...v,revision:v.revision==null?v.revision:v.revision})), onJob, onDownload, onResources: mapChannel(onResources, (v) => ({...v,devices:v.devices.map(i=>({...i,memory_budget:i.memory_budget==null?i.memory_budget:i.memory_budget,memory_used:i.memory_used==null?i.memory_used:i.memory_used,utilization:i.utilization==null?i.utilization:i.utilization}))})), onProject }).then((v) => (({...v,preferences:({...v.preferences,pipeline:({...v.preferences.pipeline,translation:({...v.preferences.pipeline.translation,generation:({...v.preferences.pipeline.translation.generation,temperature:v.preferences.pipeline.translation.generation.temperature==null?v.preferences.pipeline.translation.generation.temperature:v.preferences.pipeline.translation.generation.temperature,top_p:v.preferences.pipeline.translation.generation.top_p==null?v.preferences.pipeline.translation.generation.top_p:v.preferences.pipeline.translation.generation.top_p,min_p:v.preferences.pipeline.translation.generation.min_p==null?v.preferences.pipeline.translation.generation.min_p:v.preferences.pipeline.translation.generation.min_p,repeat_penalty:v.preferences.pipeline.translation.generation.repeat_penalty==null?v.preferences.pipeline.translation.generation.repeat_penalty:v.preferences.pipeline.translation.generation.repeat_penalty,frequency_penalty:v.preferences.pipeline.translation.generation.frequency_penalty==null?v.preferences.pipeline.translation.generation.frequency_penalty:v.preferences.pipeline.translation.generation.frequency_penalty,presence_penalty:v.preferences.pipeline.translation.generation.presence_penalty==null?v.preferences.pipeline.translation.generation.presence_penalty:v.preferences.pipeline.translation.generation.presence_penalty})}),processor:({...v.preferences.pipeline.processor,"koharu-layout-rfdetr-seg-2xl":v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"]==null?v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"]:({...v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"],text_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold==null?v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold,bubble_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold==null?v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold,panel_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold==null?v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold})})})}),jobs:v.jobs.map(i=>i),canvas:({...v.canvas,revision:v.canvas.revision==null?v.canvas.revision:v.canvas.revision})}) as typeof v)),
+} | null>, onMcp: Channel<McpEvent>) => __TAURI_INVOKE<StartupState>("subscribe", { onCanvas: mapChannel(onCanvas, (v) => ({...v,revision:v.revision==null?v.revision:v.revision})), onJob, onDownload, onResources: mapChannel(onResources, (v) => ({...v,devices:v.devices.map(i=>({...i,memory_budget:i.memory_budget==null?i.memory_budget:i.memory_budget,memory_used:i.memory_used==null?i.memory_used:i.memory_used,utilization:i.utilization==null?i.utilization:i.utilization}))})), onProject, onMcp }).then((v) => (({...v,preferences:({...v.preferences,pipeline:({...v.preferences.pipeline,translation:({...v.preferences.pipeline.translation,generation:({...v.preferences.pipeline.translation.generation,temperature:v.preferences.pipeline.translation.generation.temperature==null?v.preferences.pipeline.translation.generation.temperature:v.preferences.pipeline.translation.generation.temperature,top_p:v.preferences.pipeline.translation.generation.top_p==null?v.preferences.pipeline.translation.generation.top_p:v.preferences.pipeline.translation.generation.top_p,min_p:v.preferences.pipeline.translation.generation.min_p==null?v.preferences.pipeline.translation.generation.min_p:v.preferences.pipeline.translation.generation.min_p,repeat_penalty:v.preferences.pipeline.translation.generation.repeat_penalty==null?v.preferences.pipeline.translation.generation.repeat_penalty:v.preferences.pipeline.translation.generation.repeat_penalty,frequency_penalty:v.preferences.pipeline.translation.generation.frequency_penalty==null?v.preferences.pipeline.translation.generation.frequency_penalty:v.preferences.pipeline.translation.generation.frequency_penalty,presence_penalty:v.preferences.pipeline.translation.generation.presence_penalty==null?v.preferences.pipeline.translation.generation.presence_penalty:v.preferences.pipeline.translation.generation.presence_penalty})}),processor:({...v.preferences.pipeline.processor,"koharu-layout-rfdetr-seg-2xl":v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"]==null?v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"]:({...v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"],text_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold==null?v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold,bubble_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold==null?v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold,panel_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold==null?v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold:v.preferences.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold})})})}),jobs:v.jobs.map(i=>i),canvas:({...v.canvas,revision:v.canvas.revision==null?v.canvas.revision:v.canvas.revision})}) as typeof v)),
 	getProject: () => __TAURI_INVOKE<{
 	name: string,
 	revision: Revision,
@@ -311,12 +323,34 @@ export type LocalConfig = Record<string, never>;
 
 export type LoginEvent = { type: "progress"; message: string } | { type: "device_code"; verification_url: string; user_code: string };
 
-/**  Settings for the agent tools served over MCP. */
+/**
+ *  Settings for the agent tools served over MCP. Every field has a default,
+ *  so configurations saved before a field existed still load.
+ */
 export type McpConfig = {
-	/**  Loopback port, read once when the server starts. */
-	port: number,
+	/**  Whether Koharu serves MCP at all. */
+	enabled?: boolean,
+	/**  Loopback port, read whenever the server starts. */
+	port?: number,
+	/**  Tools that MCP clients can neither list nor call. */
+	disabled_tools?: string[],
 	/**  Folder that receives agent exports; `None` uses `Documents/Koharu/exports`. */
-	export_dir: string | null,
+	export_dir?: string | null,
+};
+
+export type McpEvent = { type: "status"; status: ServerStatus };
+
+export type McpSettings = {
+	config: McpConfig,
+	/**  Every agent tool, including the ones MCP clients may not use. */
+	tools: McpTool[],
+	/**  Where agent exports go, with the default folder resolved. */
+	export_folder: string,
+};
+
+export type McpTool = {
+	name: string,
+	metadata: ToolMetadata,
 };
 
 export type MiniMaxConfig = Record<string, never>;
@@ -470,6 +504,11 @@ export type Scope = { scope: "project" } | { scope: "pages"; value: EntityId[] }
 	bounds: Bounds,
 } } | { scope: "entities"; value: EntityId[] };
 
+/**  What the MCP server is doing, as shown in Koharu's settings. */
+export type ServerStatus = { state: "off" } | { state: "starting" } | { state: "running"; url: string; clients: number } | 
+/**  New tool calls are refused while `tasks` running calls finish. */
+{ state: "stopping"; tasks: number } | { state: "failed"; message: string };
+
 export type SourceText = {
 	text: string,
 	language: string | null,
@@ -481,6 +520,7 @@ export type StartupState = {
 	preferences: Preferences,
 	jobs: Job[],
 	canvas: CanvasState,
+	mcp: ServerStatus,
 };
 
 export type TextAlignment = "Start" | "Center" | "End" | "Justify";
@@ -496,6 +536,15 @@ export type TextContent = {
 export type TextLayoutKind = "point" | "paragraph";
 
 export type ThumbnailBytes = number[];
+
+export type ToolGroup = "read" | "pages" | "text" | "image" | "pipeline" | "output";
+
+export type ToolMetadata = {
+	group: ToolGroup,
+	vision: Vision,
+	mutates_image: boolean,
+	destructive: boolean,
+};
 
 export type TransformFrame = {
 	element: EntityId,
@@ -535,6 +584,9 @@ export type TypographyUpdate = {
 	layer: EntityId,
 	typography: Typography,
 };
+
+/**  How much a tool depends on the model seeing images. */
+export type Vision = "required" | "better" | "none";
 
 export type WritingMode = "Horizontal" | "Vertical";
 

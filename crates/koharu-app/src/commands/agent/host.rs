@@ -42,12 +42,12 @@ use crate::commands::{
 mod outline;
 
 #[derive(Clone)]
-pub(super) struct KoharuHost {
+pub(crate) struct KoharuHost {
     handle: AppHandle<CefRuntime>,
 }
 
 impl KoharuHost {
-    pub(super) fn new(handle: AppHandle<CefRuntime>) -> Self {
+    pub(crate) fn new(handle: AppHandle<CefRuntime>) -> Self {
         Self { handle }
     }
 

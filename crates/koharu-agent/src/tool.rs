@@ -2,6 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use specta::Type;
 
 use crate::Control;
 
@@ -48,7 +49,7 @@ impl Tool {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Type)]
 pub struct ToolMetadata {
     pub group: ToolGroup,
     pub vision: Vision,
@@ -56,7 +57,8 @@ pub struct ToolMetadata {
     pub destructive: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
 pub enum ToolGroup {
     Read,
     Pages,
@@ -67,7 +69,8 @@ pub enum ToolGroup {
 }
 
 /// How much a tool depends on the model seeing images.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
 pub enum Vision {
     Required,
     Better,

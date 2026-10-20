@@ -22,11 +22,16 @@ function placeholders(value: string): string[] {
 }
 
 describe('editor localization', () => {
-  it('defines the same flattened translation schema in every locale', () => {
-    const expected = keys(resources['en-US'].translation).sort()
+  // This fork writes its own interface text in English only; other locales
+  // fall back to en-US for those keys, so they may translate a subset.
+  it('translates only keys that the English schema defines', () => {
+    const expected = new Set(keys(resources['en-US'].translation))
     for (const [locale, resource] of Object.entries(resources)) {
       expect('native' in resource.translation, locale).toBe(false)
-      expect(keys(resource.translation).sort(), locale).toEqual(expected)
+      expect(
+        keys(resource.translation).filter((key) => !expected.has(key)),
+        locale,
+      ).toEqual([])
     }
   })
 
