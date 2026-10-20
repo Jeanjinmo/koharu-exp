@@ -1,7 +1,7 @@
 use std::{collections::HashSet, io::Cursor, path::PathBuf};
 
 use anyhow::{Context as _, Result, anyhow, bail};
-use image::{DynamicImage, ImageFormat, RgbaImage};
+use image::{DynamicImage, GrayImage, ImageFormat, RgbaImage};
 use koharu_desktop::Frame;
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, Authored, Commit, EntityId, EntityOrigin,
@@ -793,6 +793,46 @@ impl Project {
         {
             bail!("raster stroke points must be finite");
         }
+        self.edit_raster(page, layer, mode, |image| {
+            rasterize_stroke(image, mode, color, diameter, &points);
+            Ok(())
+        })
+        .await
+    }
+
+    /// Paints `color` or erases through a page-sized coverage mask.
+    pub(crate) async fn apply_raster_mask(
+        &mut self,
+        page: EntityId,
+        layer: Option<EntityId>,
+        mode: RasterStrokeMode,
+        color: [u8; 4],
+        coverage: &GrayImage,
+    ) -> Result<(Commit, EntityId)> {
+        self.edit_raster(page, layer, mode, |image| {
+            if image.dimensions() != coverage.dimensions() {
+                bail!("the area mask does not match the page size");
+            }
+            for (pixel, coverage) in image.pixels_mut().zip(coverage.pixels()) {
+                let coverage = f32::from(coverage.0[0]) / 255.0;
+                if coverage > 0.0 {
+                    blend(pixel, mode, color, coverage);
+                }
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// Edits the pixels of a paint or cleanup layer on `page`, or of a new
+    /// paint layer when `layer` is `None`, as one commit.
+    async fn edit_raster(
+        &mut self,
+        page: EntityId,
+        layer: Option<EntityId>,
+        mode: RasterStrokeMode,
+        edit: impl FnOnce(&mut RgbaImage) -> Result<()>,
+    ) -> Result<(Commit, EntityId)> {
         let snapshot = self.snapshot();
         let page_value = snapshot.page(page)?.page()?;
         let width = page_value.width.round() as u32;
@@ -804,11 +844,11 @@ impl Project {
         let mut promote_layer = false;
         let mut image = if let Some(layer) = layer {
             if snapshot.parent(layer)? != Some(page) {
-                bail!("the raster target must be a layer on the active page");
+                bail!("layer {layer} is not a paint or cleanup layer on page {page}");
             }
             let target = snapshot
                 .component::<SceneRasterLayer>(layer)?
-                .context("the raster target must be a layer on the active page")?;
+                .with_context(|| format!("layer {layer} is not a paint or cleanup layer"))?;
             promote_layer = target.origin != Origin::User
                 || snapshot
                     .component::<EntityOrigin>(layer)?
@@ -830,7 +870,7 @@ impl Project {
         if image.dimensions() != (width, height) {
             bail!("raster layer dimensions must match the page");
         }
-        rasterize_stroke(&mut image, mode, color, diameter, &points);
+        edit(&mut image)?;
         let mut bytes = Cursor::new(Vec::new());
         DynamicImage::ImageRgba8(image).write_to(&mut bytes, ImageFormat::Png)?;
         let source = AssetRole::new("source")?;
@@ -1351,30 +1391,34 @@ fn rasterize_stroke(
                 if coverage == 0.0 {
                     continue;
                 }
-                let pixel = image.get_pixel_mut(x, y);
-                match mode {
-                    RasterStrokeMode::Paint => {
-                        let source_alpha = f32::from(color[3]) / 255.0 * coverage;
-                        let destination_alpha = f32::from(pixel[3]) / 255.0;
-                        let output_alpha = source_alpha + destination_alpha * (1.0 - source_alpha);
-                        if output_alpha > 0.0 {
-                            for channel in 0..3 {
-                                let source = f32::from(color[channel]) / 255.0;
-                                let destination = f32::from(pixel[channel]) / 255.0;
-                                pixel[channel] = (((source * source_alpha
-                                    + destination * destination_alpha * (1.0 - source_alpha))
-                                    / output_alpha)
-                                    * 255.0)
-                                    .round() as u8;
-                            }
-                        }
-                        pixel[3] = (output_alpha * 255.0).round() as u8;
-                    }
-                    RasterStrokeMode::Erase => {
-                        pixel[3] = (f32::from(pixel[3]) * (1.0 - coverage)).round() as u8;
-                    }
+                blend(image.get_pixel_mut(x, y), mode, color, coverage);
+            }
+        }
+    }
+}
+
+/// Composites `color` over a pixel, or erases it, at `coverage` in `0..=1`.
+fn blend(pixel: &mut image::Rgba<u8>, mode: RasterStrokeMode, color: [u8; 4], coverage: f32) {
+    match mode {
+        RasterStrokeMode::Paint => {
+            let source_alpha = f32::from(color[3]) / 255.0 * coverage;
+            let destination_alpha = f32::from(pixel[3]) / 255.0;
+            let output_alpha = source_alpha + destination_alpha * (1.0 - source_alpha);
+            if output_alpha > 0.0 {
+                for channel in 0..3 {
+                    let source = f32::from(color[channel]) / 255.0;
+                    let destination = f32::from(pixel[channel]) / 255.0;
+                    pixel[channel] = (((source * source_alpha
+                        + destination * destination_alpha * (1.0 - source_alpha))
+                        / output_alpha)
+                        * 255.0)
+                        .round() as u8;
                 }
             }
+            pixel[3] = (output_alpha * 255.0).round() as u8;
+        }
+        RasterStrokeMode::Erase => {
+            pixel[3] = (f32::from(pixel[3]) * (1.0 - coverage)).round() as u8;
         }
     }
 }
@@ -1591,6 +1635,63 @@ mod tests {
             .unwrap();
         assert_eq!(commit.changes.from, revision);
         assert_eq!(translation(&project, layers[1]).unwrap().text.value, "two");
+    }
+
+    async fn layer_pixels(project: &Project, layer: EntityId) -> RgbaImage {
+        let snapshot = project.snapshot();
+        let asset = snapshot
+            .asset(layer, &AssetRole::new("source").unwrap())
+            .unwrap()
+            .unwrap();
+        let bytes = snapshot.read_blob(asset.blob).await.unwrap();
+        image::load_from_memory(&bytes).unwrap().to_rgba8()
+    }
+
+    fn area_mask(x: f64, y: f64, width: f64, height: f64) -> GrayImage {
+        crate::commands::area::Area::Rects(vec![koharu_pipeline::Bounds {
+            x,
+            y,
+            width,
+            height,
+        }])
+        .mask(100, 100)
+        .unwrap()
+        .coverage
+    }
+
+    #[tokio::test]
+    async fn area_masks_paint_exact_colors_on_raster_layers_only() {
+        let (mut project, page, layers) = project_with_text(1).await;
+        let white = [255, 255, 255, 255];
+
+        let (_, layer) = project
+            .apply_raster_mask(
+                page,
+                None,
+                RasterStrokeMode::Paint,
+                white,
+                &area_mask(10.0, 20.0, 30.0, 10.0),
+            )
+            .await
+            .unwrap();
+
+        let pixels = layer_pixels(&project, layer).await;
+        assert_eq!(pixels.get_pixel(10, 20).0, white);
+        assert_eq!(pixels.get_pixel(39, 29).0, white);
+        assert_eq!(pixels.get_pixel(40, 29)[3], 0);
+        assert_eq!(pixels.get_pixel(10, 30)[3], 0);
+        assert!(
+            project
+                .apply_raster_mask(
+                    page,
+                    Some(layers[0]),
+                    RasterStrokeMode::Paint,
+                    white,
+                    &area_mask(0.0, 0.0, 5.0, 5.0),
+                )
+                .await
+                .is_err()
+        );
     }
 
     #[test]

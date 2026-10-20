@@ -26,14 +26,16 @@ use tauri_runtime_cef::CefRuntime;
 
 use crate::commands::{
     ChannelExt as _,
-    area::Area,
+    area::{Area, Mask},
     canvas::{CanvasChannel, Point},
     editing::{GeometryUpdate, TypographyUpdate},
     lifecycle::ProjectChannel,
     output,
     preferences::Preferences,
     processing::{JobId, Processing},
-    project::{CurrentProject, Project, ProjectInfo, TranslationUpdate, Typography},
+    project::{
+        CurrentProject, Project, ProjectInfo, RasterStrokeMode, TranslationUpdate, Typography,
+    },
 };
 
 mod outline;
@@ -239,6 +241,13 @@ impl KoharuHost {
             "base_revision": report.base,
             "final_revision": report.final_revision,
         }))
+    }
+
+    async fn mask(&self, page: EntityId, arguments: AreaArguments) -> Result<Mask> {
+        let snapshot = self.snapshot().await?;
+        let area = area(&snapshot, page, arguments)?;
+        let (width, height) = page_pixels(&snapshot, page)?;
+        tokio_rayon::spawn(move || area.mask(width, height)).await
     }
 
     /// Runs the pipeline as an agent job: one job at a time with the UI's
@@ -591,6 +600,28 @@ impl Host for KoharuHost {
                 .await
             }
             "remove" => self.remove(arguments(&call)?, control).await,
+            "draw" => {
+                let arguments: Draw = arguments(&call)?;
+                let page = entity(&arguments.page)?;
+                let color = hex_color(&arguments.color)?;
+                let layer = arguments.layer.as_deref().map(entity).transpose()?;
+                let mask = self.mask(page, arguments.area).await?;
+                self.mutate(|project| {
+                    Box::pin(async move {
+                        let (commit, layer) = project
+                            .apply_raster_mask(
+                                page,
+                                layer,
+                                RasterStrokeMode::Paint,
+                                color,
+                                &mask.coverage,
+                            )
+                            .await?;
+                        Ok((commit, json!({ "page": page, "layer": layer })))
+                    })
+                })
+                .await
+            }
             "run_pipeline" => self.run_pipeline(arguments(&call)?, control).await,
             name => bail!("unknown Koharu tool {name}"),
         }
@@ -788,6 +819,15 @@ fn tools() -> &'static [Tool] {
                         ..metadata(ToolGroup::Image)
                     },
                 ),
+                definition::<Draw>(
+                    "draw",
+                    "Fill one area of a page with a solid color, like the Draw tool, for example white over leftover text. Draws on the given paint or cleanup layer, or on a new paint layer, and returns the layer ID. Give the area as text elements, a rect, or a brush path.",
+                    ToolMetadata {
+                        vision: Vision::Better,
+                        mutates_image: true,
+                        ..metadata(ToolGroup::Image)
+                    },
+                ),
                 definition::<RunPipeline>(
                     "run_pipeline",
                     "Run Koharu's configured processing pipeline for the whole project, selected pages, or selected text elements.",
@@ -837,6 +877,26 @@ fn area(snapshot: &Snapshot, page: EntityId, arguments: AreaArguments) -> Result
         }),
         _ => bail!("give exactly one of elements, rect, or points with diameter"),
     }
+}
+
+fn hex_color(value: &str) -> Result<[u8; 4]> {
+    let digits = value.trim().trim_start_matches('#');
+    let channel = |index: usize| {
+        digits
+            .get(index..index + 2)
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+    };
+    let color = match digits.len() {
+        6 => (0..3)
+            .map(|index| channel(index * 2))
+            .chain([Some(u8::MAX)])
+            .collect::<Option<Vec<_>>>(),
+        8 => (0..4).map(|index| channel(index * 2)).collect(),
+        _ => None,
+    };
+    color
+        .and_then(|color| color.try_into().ok())
+        .with_context(|| format!("{value:?} is not a #RRGGBB or #RRGGBBAA color"))
 }
 
 fn page_pixels(snapshot: &Snapshot, page: EntityId) -> Result<(u32, u32)> {
@@ -922,6 +982,17 @@ struct Remove {
     page: String,
     #[serde(flatten)]
     area: AreaArguments,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct Draw {
+    page: String,
+    #[serde(flatten)]
+    area: AreaArguments,
+    /// Fill color as `#RRGGBB` or `#RRGGBBAA`.
+    color: String,
+    /// Paint or cleanup layer to draw on. Omit it to add a new paint layer.
+    layer: Option<String>,
 }
 
 /// An axis-aligned rectangle in page pixels.
@@ -1154,6 +1225,14 @@ mod tests {
     use koharu_renderer::RenderBounds;
 
     use super::*;
+
+    #[test]
+    fn hex_colors_parse_with_or_without_alpha() {
+        assert_eq!(hex_color("#FFFFFF").unwrap(), [255, 255, 255, 255]);
+        assert_eq!(hex_color("10203080").unwrap(), [16, 32, 48, 128]);
+        assert!(hex_color("#FFF").is_err());
+        assert!(hex_color("#GG0000").is_err());
+    }
 
     #[test]
     fn tool_arguments_are_object_schemas() {
