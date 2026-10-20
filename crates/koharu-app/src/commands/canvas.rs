@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow, bail};
-use image::{GrayImage, ImageEncoder as _, codecs::png::PngEncoder};
 use koharu_desktop::{CanvasState, Desktop, Frame, TransformFrame};
 use koharu_rasterizer::ResourceId;
 use koharu_scene::{EntityId, Revision};
@@ -15,7 +14,9 @@ use tauri::{
 use tauri_runtime_cef::CefRuntime;
 
 use super::{
-    ChannelExt as _, Error, processing,
+    ChannelExt as _, Error,
+    area::Area,
+    processing,
     processing::{JobChannel, JobId, Processing},
     project::{CurrentProject, Page, Project, RasterStrokeMode},
 };
@@ -384,7 +385,8 @@ pub(crate) async fn commit_inpaint(
         )
     };
     let (png, bounds) =
-        tokio_rayon::spawn(move || encode_mask(width, height, &points, diameter)).await?;
+        tokio_rayon::spawn(move || Area::Stroke { points, diameter }.mask_png(width, height))
+            .await?;
     *handle.state::<Processing>().inpainting_mask.lock() = Some(koharu_pipeline::InpaintingMask {
         page,
         png: Arc::from(png),
@@ -409,78 +411,4 @@ fn ensure_revision(actual: Revision, expected: Revision) -> anyhow::Result<()> {
         bail!("canvas edit expected revision {expected}, but the project is at {actual}");
     }
     Ok(())
-}
-
-fn encode_mask(
-    width: u32,
-    height: u32,
-    points: &[Point],
-    diameter: f32,
-) -> anyhow::Result<(Vec<u8>, koharu_pipeline::Bounds)> {
-    if width == 0 || height == 0 {
-        bail!("page dimensions must be positive");
-    }
-    let mut image = GrayImage::new(width, height);
-    let radius = f64::from(diameter) * 0.5;
-    let mut dirty = None::<[u32; 4]>;
-    for (start, end) in points
-        .iter()
-        .zip(points.iter().skip(1))
-        .chain(points.last().map(|point| (point, point)))
-    {
-        let left = (start.x.min(end.x) - radius - 0.5).floor().max(0.0) as u32;
-        let top = (start.y.min(end.y) - radius - 0.5).floor().max(0.0) as u32;
-        let right = (start.x.max(end.x) + radius + 0.5)
-            .ceil()
-            .min(f64::from(width)) as u32;
-        let bottom = (start.y.max(end.y) + radius + 0.5)
-            .ceil()
-            .min(f64::from(height)) as u32;
-        let dx = end.x - start.x;
-        let dy = end.y - start.y;
-        let length_squared = dx.mul_add(dx, dy * dy);
-        for y in top..bottom {
-            for x in left..right {
-                let px = f64::from(x) + 0.5;
-                let py = f64::from(y) + 0.5;
-                let progress = if length_squared <= f64::EPSILON {
-                    0.0
-                } else {
-                    (((px - start.x) * dx + (py - start.y) * dy) / length_squared).clamp(0.0, 1.0)
-                };
-                let nearest_x = start.x + progress * dx;
-                let nearest_y = start.y + progress * dy;
-                let distance = (px - nearest_x).hypot(py - nearest_y);
-                let coverage = ((radius + 0.5 - distance).clamp(0.0, 1.0) * 255.0).round() as u8;
-                if coverage == 0 {
-                    continue;
-                }
-                let pixel = image.get_pixel_mut(x, y);
-                pixel.0[0] = pixel.0[0].max(coverage);
-                dirty = Some(match dirty {
-                    Some([min_x, min_y, max_x, max_y]) => {
-                        [min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y)]
-                    }
-                    None => [x, y, x, y],
-                });
-            }
-        }
-    }
-    let [left, top, right, bottom] = dirty.context("inpaint stroke does not intersect the page")?;
-    let mut png = Vec::new();
-    PngEncoder::new(&mut png).write_image(
-        image.as_raw(),
-        width,
-        height,
-        image::ExtendedColorType::L8,
-    )?;
-    Ok((
-        png,
-        koharu_pipeline::Bounds {
-            x: f64::from(left),
-            y: f64::from(top),
-            width: f64::from(right - left + 1),
-            height: f64::from(bottom - top + 1),
-        },
-    ))
 }

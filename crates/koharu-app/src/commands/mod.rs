@@ -1,4 +1,5 @@
 pub(crate) mod agent;
+pub(crate) mod area;
 pub(crate) mod canvas;
 pub(crate) mod editing;
 pub(crate) mod fonts;

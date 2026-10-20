@@ -1,4 +1,9 @@
-use std::{collections::BTreeSet, future::Future, pin::Pin, sync::OnceLock};
+use std::{
+    collections::BTreeSet,
+    future::Future,
+    pin::Pin,
+    sync::{Arc, OnceLock},
+};
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -6,10 +11,13 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use koharu_agent::{Control, Host, Invocation, Tool, ToolCall, ToolGroup, ToolMetadata, Vision};
 use koharu_desktop::{Desktop, Frame};
 use koharu_pipeline::{
-    Bounds, Committer, Operation, PipelineConfig, RunStatus, Scope, Stage, StageOutput, StopToken,
+    Bounds, Committer, InpaintingMask, Operation, PipelineConfig, Report, RunStatus, Scope, Stage,
+    StageOutput, StopToken,
 };
 use koharu_renderer::RenderDiagnostic;
-use koharu_scene::{Commit, EntityId, LanguageTag, Revision, Snapshot};
+use koharu_scene::{
+    Commit, EntityId, LanguageTag, RasterLayer, RasterLayerKind, Revision, Snapshot,
+};
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -18,6 +26,7 @@ use tauri_runtime_cef::CefRuntime;
 
 use crate::commands::{
     ChannelExt as _,
+    area::Area,
     canvas::{CanvasChannel, Point},
     editing::{GeometryUpdate, TypographyUpdate},
     lifecycle::ProjectChannel,
@@ -183,16 +192,65 @@ impl KoharuHost {
 
     async fn run_pipeline(&self, arguments: RunPipeline, control: &Control) -> Result<Invocation> {
         let scope = arguments.scope()?;
-        let operation = arguments.operation.into();
-        let snapshot = self
-            .handle
-            .state::<CurrentProject>()
-            .project
-            .lock()
-            .await
-            .as_ref()
-            .context("no project is open")?
-            .snapshot();
+        let report = self
+            .process(scope, arguments.operation.into(), None, control)
+            .await?;
+        Invocation::changed(json!({
+            "base_revision": report.base,
+            "final_revision": report.final_revision,
+            "completed": report.completed,
+            "total": report.total,
+            "elapsed_ms": report.elapsed.as_millis(),
+        }))
+    }
+
+    /// Inpaints only the given area of a page into its cleanup layer.
+    async fn remove(&self, arguments: Remove, control: &Control) -> Result<Invocation> {
+        let page = entity(&arguments.page)?;
+        let snapshot = self.snapshot().await?;
+        let area = area(&snapshot, page, arguments.area)?;
+        let (width, height) = page_pixels(&snapshot, page)?;
+        let (png, bounds) = tokio_rayon::spawn(move || area.mask_png(width, height)).await?;
+        let report = self
+            .process(
+                Scope::Region { page, bounds },
+                Operation::Only {
+                    stage: Stage::Inpainting,
+                },
+                Some(InpaintingMask {
+                    page,
+                    png: Arc::from(png),
+                }),
+                control,
+            )
+            .await?;
+        let snapshot = self.snapshot().await?;
+        let cleanup_layer = snapshot.children(page)?.find(|layer| {
+            snapshot
+                .component::<RasterLayer>(*layer)
+                .ok()
+                .flatten()
+                .is_some_and(|raster| raster.kind == RasterLayerKind::Cleanup)
+        });
+        Invocation::changed(json!({
+            "page": page,
+            "area": [bounds.x, bounds.y, bounds.width, bounds.height],
+            "cleanup_layer": cleanup_layer,
+            "base_revision": report.base,
+            "final_revision": report.final_revision,
+        }))
+    }
+
+    /// Runs the pipeline as an agent job: one job at a time with the UI's
+    /// processing, cancelled through the agent control, committed as it goes.
+    async fn process(
+        &self,
+        scope: Scope,
+        operation: Operation,
+        inpainting_mask: Option<InpaintingMask>,
+        control: &Control,
+    ) -> Result<Report> {
+        let snapshot = self.snapshot().await?;
         let job = JobId::new();
         let stop = StopToken::default();
         {
@@ -218,7 +276,7 @@ impl KoharuHost {
             scope,
             stop,
             progress: None,
-            inpainting_mask: None,
+            inpainting_mask,
         };
         let result = self
             .handle
@@ -231,13 +289,7 @@ impl KoharuHost {
         if report.status == RunStatus::Stopped {
             bail!("pipeline processing was cancelled");
         }
-        Invocation::changed(json!({
-            "base_revision": report.base,
-            "final_revision": report.final_revision,
-            "completed": report.completed,
-            "total": report.total,
-            "elapsed_ms": report.elapsed.as_millis(),
-        }))
+        Ok(report)
     }
 }
 
@@ -248,111 +300,7 @@ impl Host for KoharuHost {
     }
 
     fn tools(&self) -> Vec<Tool> {
-        static TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
-        TOOLS
-            .get_or_init(|| {
-                vec![
-                    definition::<InspectProject>(
-                        "inspect_project",
-                        "Read the latest complete semantic project state after edits. This does not include page images.",
-                        metadata(ToolGroup::Read),
-                    ),
-                    definition::<InspectPage>(
-                        "inspect_page",
-                        "Read one page compactly: its size, every text element (ID, box, source text and translation with languages, core typography) and its paint and cleanup layer IDs. Prefer this over inspect_project when working page by page.",
-                        metadata(ToolGroup::Read),
-                    ),
-                    definition::<ViewPage>(
-                        "view_page",
-                        "Render one page, or one region of it at full resolution, as an image. Call this only for pages whose visual appearance matters to the request. The result gives the page size and the area shown; convert image coordinates with page_x = view.x + image_x / view.scale and page_y = view.y + image_y / view.scale.",
-                        ToolMetadata {
-                            vision: Vision::Required,
-                            ..metadata(ToolGroup::Read)
-                        },
-                    ),
-                    definition::<RenamePage>(
-                        "rename_page",
-                        "Rename a project page.",
-                        metadata(ToolGroup::Pages),
-                    ),
-                    definition::<MovePage>(
-                        "move_page",
-                        "Move a page to a zero-based project index.",
-                        metadata(ToolGroup::Pages),
-                    ),
-                    definition::<DeletePages>(
-                        "delete_pages",
-                        "Delete pages and their contents.",
-                        ToolMetadata {
-                            destructive: true,
-                            ..metadata(ToolGroup::Pages)
-                        },
-                    ),
-                    definition::<AddTextBox>(
-                        "add_text_box",
-                        "Add a paragraph text box to a page.",
-                        ToolMetadata {
-                            vision: Vision::Better,
-                            ..metadata(ToolGroup::Text)
-                        },
-                    ),
-                    definition::<SetText>(
-                        "set_source_text",
-                        "Replace an element's source text.",
-                        metadata(ToolGroup::Text),
-                    ),
-                    definition::<SetTranslation>(
-                        "set_translation",
-                        "Set an element's translation, or pass null to remove it. The translation is tagged with its language, which decides how lines break. The result warns when the text overflows its frame or shrinks below the readable size.",
-                        metadata(ToolGroup::Text),
-                    ),
-                    definition::<SetTranslations>(
-                        "set_translations",
-                        "Set the translations of many elements in one call and one undo step. Every element is validated first; if any is invalid, nothing changes. Prefer this over repeated set_translation calls. The result warns about text that overflows its frame or shrinks below the readable size.",
-                        metadata(ToolGroup::Text),
-                    ),
-                    definition::<SetTypography>(
-                        "set_typography",
-                        "Replace an element's typography settings. Font is a family name from available_fonts.",
-                        metadata(ToolGroup::Text),
-                    ),
-                    definition::<SetGeometry>(
-                        "set_geometry",
-                        "Replace an element's page-space polygon geometry.",
-                        ToolMetadata {
-                            vision: Vision::Better,
-                            ..metadata(ToolGroup::Text)
-                        },
-                    ),
-                    definition::<SetVisibility>(
-                        "set_visibility",
-                        "Change visibility and/or opacity for elements.",
-                        metadata(ToolGroup::Text),
-                    ),
-                    definition::<DeleteElements>(
-                        "delete_elements",
-                        "Delete elements and descendants.",
-                        ToolMetadata {
-                            destructive: true,
-                            ..metadata(ToolGroup::Text)
-                        },
-                    ),
-                    definition::<MoveElement>(
-                        "move_element",
-                        "Move an element under a page or element at a zero-based index.",
-                        metadata(ToolGroup::Text),
-                    ),
-                    definition::<RunPipeline>(
-                        "run_pipeline",
-                        "Run Koharu's configured processing pipeline for the whole project, selected pages, or selected text elements.",
-                        ToolMetadata {
-                            mutates_image: true,
-                            ..metadata(ToolGroup::Pipeline)
-                        },
-                    ),
-                ]
-            })
-            .clone()
+        tools().to_vec()
     }
 
     #[tracing::instrument(
@@ -642,6 +590,7 @@ impl Host for KoharuHost {
                 })
                 .await
             }
+            "remove" => self.remove(arguments(&call)?, control).await,
             "run_pipeline" => self.run_pipeline(arguments(&call)?, control).await,
             name => bail!("unknown Koharu tool {name}"),
         }
@@ -734,6 +683,123 @@ impl Committer for AgentCommitter {
     }
 }
 
+/// Every tool the host offers, shared by the in-app agent and the MCP server.
+fn tools() -> &'static [Tool] {
+    static TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
+    TOOLS
+        .get_or_init(|| {
+            vec![
+                definition::<InspectProject>(
+                    "inspect_project",
+                    "Read the latest complete semantic project state after edits. This does not include page images.",
+                    metadata(ToolGroup::Read),
+                ),
+                definition::<InspectPage>(
+                    "inspect_page",
+                    "Read one page compactly: its size, every text element (ID, box, source text and translation with languages, core typography) and its paint and cleanup layer IDs. Prefer this over inspect_project when working page by page.",
+                    metadata(ToolGroup::Read),
+                ),
+                definition::<ViewPage>(
+                    "view_page",
+                    "Render one page, or one region of it at full resolution, as an image. Call this only for pages whose visual appearance matters to the request. The result gives the page size and the area shown; convert image coordinates with page_x = view.x + image_x / view.scale and page_y = view.y + image_y / view.scale.",
+                    ToolMetadata {
+                        vision: Vision::Required,
+                        ..metadata(ToolGroup::Read)
+                    },
+                ),
+                definition::<RenamePage>(
+                    "rename_page",
+                    "Rename a project page.",
+                    metadata(ToolGroup::Pages),
+                ),
+                definition::<MovePage>(
+                    "move_page",
+                    "Move a page to a zero-based project index.",
+                    metadata(ToolGroup::Pages),
+                ),
+                definition::<DeletePages>(
+                    "delete_pages",
+                    "Delete pages and their contents.",
+                    ToolMetadata {
+                        destructive: true,
+                        ..metadata(ToolGroup::Pages)
+                    },
+                ),
+                definition::<AddTextBox>(
+                    "add_text_box",
+                    "Add a paragraph text box to a page.",
+                    ToolMetadata {
+                        vision: Vision::Better,
+                        ..metadata(ToolGroup::Text)
+                    },
+                ),
+                definition::<SetText>(
+                    "set_source_text",
+                    "Replace an element's source text.",
+                    metadata(ToolGroup::Text),
+                ),
+                definition::<SetTranslation>(
+                    "set_translation",
+                    "Set an element's translation, or pass null to remove it. The translation is tagged with its language, which decides how lines break. The result warns when the text overflows its frame or shrinks below the readable size.",
+                    metadata(ToolGroup::Text),
+                ),
+                definition::<SetTranslations>(
+                    "set_translations",
+                    "Set the translations of many elements in one call and one undo step. Every element is validated first; if any is invalid, nothing changes. Prefer this over repeated set_translation calls. The result warns about text that overflows its frame or shrinks below the readable size.",
+                    metadata(ToolGroup::Text),
+                ),
+                definition::<SetTypography>(
+                    "set_typography",
+                    "Replace an element's typography settings. Font is a family name from available_fonts.",
+                    metadata(ToolGroup::Text),
+                ),
+                definition::<SetGeometry>(
+                    "set_geometry",
+                    "Replace an element's page-space polygon geometry.",
+                    ToolMetadata {
+                        vision: Vision::Better,
+                        ..metadata(ToolGroup::Text)
+                    },
+                ),
+                definition::<SetVisibility>(
+                    "set_visibility",
+                    "Change visibility and/or opacity for elements.",
+                    metadata(ToolGroup::Text),
+                ),
+                definition::<DeleteElements>(
+                    "delete_elements",
+                    "Delete elements and descendants.",
+                    ToolMetadata {
+                        destructive: true,
+                        ..metadata(ToolGroup::Text)
+                    },
+                ),
+                definition::<MoveElement>(
+                    "move_element",
+                    "Move an element under a page or element at a zero-based index.",
+                    metadata(ToolGroup::Text),
+                ),
+                definition::<Remove>(
+                    "remove",
+                    "Remove artwork such as original text from one area of a page by inpainting it, like the Remove tool. Pixels outside the area do not change; the result goes into the page's cleanup layer and can be undone. Give the area as text elements, a rect, or a brush path. The inpainting model tends to continue structural lines through the area.",
+                    ToolMetadata {
+                        vision: Vision::Better,
+                        mutates_image: true,
+                        ..metadata(ToolGroup::Image)
+                    },
+                ),
+                definition::<RunPipeline>(
+                    "run_pipeline",
+                    "Run Koharu's configured processing pipeline for the whole project, selected pages, or selected text elements.",
+                    ToolMetadata {
+                        mutates_image: true,
+                        ..metadata(ToolGroup::Pipeline)
+                    },
+                ),
+            ]
+        })
+}
+
 fn definition<T: JsonSchema>(name: &str, description: &str, metadata: ToolMetadata) -> Tool {
     Tool::new(
         name,
@@ -741,6 +807,41 @@ fn definition<T: JsonSchema>(name: &str, description: &str, metadata: ToolMetada
         serde_json::to_value(schema_for!(T)).expect("tool argument schema must serialize"),
         metadata,
     )
+}
+
+/// Resolves the area an area tool works on from exactly one way of giving it.
+fn area(snapshot: &Snapshot, page: EntityId, arguments: AreaArguments) -> Result<Area> {
+    let AreaArguments {
+        elements,
+        rect,
+        points,
+        diameter,
+    } = arguments;
+    match (!elements.is_empty(), rect, !points.is_empty()) {
+        (true, None, false) => Ok(Area::Rects(
+            elements
+                .iter()
+                .map(|element| outline::element_area(snapshot, page, entity(element)?))
+                .collect::<Result<_>>()?,
+        )),
+        (false, Some(rect), false) => Ok(Area::Rects(vec![rect.into()])),
+        (false, None, true) => Ok(Area::Stroke {
+            points: points
+                .into_iter()
+                .map(|point| Point {
+                    x: point.x,
+                    y: point.y,
+                })
+                .collect(),
+            diameter: diameter.context("points need a brush diameter")?,
+        }),
+        _ => bail!("give exactly one of elements, rect, or points with diameter"),
+    }
+}
+
+fn page_pixels(snapshot: &Snapshot, page: EntityId) -> Result<(u32, u32)> {
+    let value = snapshot.page(page)?.page()?;
+    Ok((value.width.round() as u32, value.height.round() as u32))
 }
 
 /// Metadata for a tool that only needs text and leaves artwork and content intact.
@@ -799,6 +900,28 @@ struct ViewPage {
     page: String,
     /// Page area to view at full resolution instead of the whole page.
     region: Option<Rect>,
+}
+
+/// The page area an area tool works on. Give exactly one of `elements`,
+/// `rect`, or `points` with `diameter`.
+#[derive(Deserialize, JsonSchema)]
+struct AreaArguments {
+    /// Text elements on the page. Each covers the box where its original text
+    /// was detected, or its text box when no detection exists.
+    #[serde(default)]
+    elements: Vec<String>,
+    rect: Option<Rect>,
+    /// A brush path in page pixels, drawn with a round brush of `diameter`.
+    #[serde(default)]
+    points: Vec<AgentPoint>,
+    diameter: Option<f32>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct Remove {
+    page: String,
+    #[serde(flatten)]
+    area: AreaArguments,
 }
 
 /// An axis-aligned rectangle in page pixels.
@@ -1031,6 +1154,21 @@ mod tests {
     use koharu_renderer::RenderBounds;
 
     use super::*;
+
+    #[test]
+    fn tool_arguments_are_object_schemas() {
+        for tool in tools() {
+            assert_eq!(tool.parameters["type"], json!("object"), "{}", tool.name);
+        }
+        let remove = tools().iter().find(|tool| tool.name == "remove").unwrap();
+        for property in ["page", "elements", "rect", "points", "diameter"] {
+            assert!(
+                remove.parameters["properties"].get(property).is_some(),
+                "remove lacks {property}: {}",
+                remove.parameters
+            );
+        }
+    }
 
     #[test]
     fn fit_warnings_merge_diagnostics_for_the_edited_elements() {

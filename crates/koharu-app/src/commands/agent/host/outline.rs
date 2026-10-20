@@ -4,7 +4,8 @@
 
 use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result, bail};
+use koharu_pipeline::Bounds;
 use koharu_scene::{EntityId, RasterLayerKind, Snapshot, TextAlignment, WritingMode};
 use serde::Serialize;
 
@@ -136,6 +137,57 @@ pub(super) fn page_outline(snapshot: &Snapshot, page: EntityId) -> Result<PageOu
         elements,
         raster_layers,
     })
+}
+
+/// The page-space box an area tool uses for a text element: the area where its
+/// original text was detected, otherwise the box its text is laid out in.
+pub(super) fn element_area(
+    snapshot: &Snapshot,
+    page: EntityId,
+    element: EntityId,
+) -> Result<Bounds> {
+    if Project::containing_page(snapshot, element)? != page {
+        bail!("element {element} is not on page {page}");
+    }
+    let view = Project::page(snapshot, page)?;
+    let Some(Layer::Text {
+        geometry,
+        content,
+        automatic_region,
+        ..
+    }) = view
+        .layers
+        .into_iter()
+        .find(|layer| layer_id(layer) == element)
+    else {
+        bail!("element {element} is not a text element");
+    };
+    let region = |id: Option<EntityId>| {
+        id.and_then(|id| view.regions.iter().find(|region| region.id == id))
+            .map(|region| region.geometry.clone())
+    };
+    let [x, y, width, height] = region(content.source_region)
+        .or(geometry)
+        .or_else(|| region(automatic_region))
+        .as_ref()
+        .and_then(extent)
+        .with_context(|| format!("element {element} has no area on the page"))?;
+    Ok(Bounds {
+        x,
+        y,
+        width,
+        height,
+    })
+}
+
+fn layer_id(layer: &Layer) -> EntityId {
+    match layer {
+        Layer::Group { id, .. }
+        | Layer::Text { id, .. }
+        | Layer::Raster { id, .. }
+        | Layer::Image { id, .. }
+        | Layer::Artwork { id, .. } => *id,
+    }
 }
 
 fn typography_outline(typography: Typography) -> Option<TypographyOutline> {
@@ -274,5 +326,12 @@ mod tests {
             Some("id-ID")
         );
         assert_eq!(outline.raster_layers[0].id, cleanup);
+
+        let area = element_area(&snapshot, page, elements[0]).unwrap();
+        assert_eq!(
+            [area.x, area.y, area.width, area.height],
+            [110.0, 50.0, 180.0, 120.0]
+        );
+        assert!(element_area(&snapshot, page, cleanup).is_err());
     }
 }
