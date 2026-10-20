@@ -12,7 +12,11 @@ use koharu_scene::{AssetRole, EntityId, Snapshot};
 use rayon::prelude::*;
 use serde::Deserialize;
 use specta::Type;
-use std::{io::Write as _, sync::Arc};
+use std::{
+    io::Write as _,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tauri::{State, WebviewWindow, ipc::IpcResponse};
 use tauri_runtime_cef::CefRuntime;
 
@@ -76,9 +80,72 @@ pub(crate) async fn export(
     let Some(destination) = destination.map(|destination| destination.path().to_owned()) else {
         return Ok(());
     };
+    let files = render_export(&desktop, &snapshot, &pages, format).await?;
+    tokio_rayon::spawn(move || write_export(files, format, &destination, Overwrite::Allow)).await?;
+    Ok(())
+}
+
+pub(crate) struct ExportedFolder {
+    pub(crate) path: PathBuf,
+    pub(crate) files: usize,
+}
+
+/// Exports pages into a new `<project>_<YYYY-MM-DD_HHMM>` folder under `root`,
+/// adding a numeric suffix when that folder exists. Nothing is ever replaced.
+pub(crate) async fn export_to_new_folder(
+    desktop: &Desktop,
+    snapshot: &Snapshot,
+    project: &str,
+    pages: &[EntityId],
+    format: ExportFormat,
+    root: &Path,
+) -> Result<ExportedFolder> {
+    if pages.is_empty() {
+        anyhow::bail!("there are no pages to export");
+    }
+    let files = render_export(desktop, snapshot, pages, format).await?;
+    let stamp = chrono::Local::now().format("%Y-%m-%d_%H%M").to_string();
+    let root = root.to_owned();
+    let project = project.to_owned();
+    tokio_rayon::spawn(move || {
+        let folder = create_new_folder(&root, &format!("{project}_{stamp}"))?;
+        let (path, files) = match format {
+            ExportFormat::Png | ExportFormat::Psd => {
+                let count = write_export(files, format, &folder, Overwrite::Never)?;
+                (folder, count)
+            }
+            ExportFormat::Cbz => {
+                let archive = folder.join(format!("{project}.cbz"));
+                write_export(files, format, &archive, Overwrite::Never)?;
+                (archive, 1)
+            }
+        };
+        Ok(ExportedFolder { path, files })
+    })
+    .await
+}
+
+/// One rendered page, named `{project position}_{label}.{extension}`.
+struct ExportFile {
+    name: String,
+    bytes: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Overwrite {
+    Allow,
+    Never,
+}
+
+async fn render_export(
+    desktop: &Desktop,
+    snapshot: &Snapshot,
+    pages: &[EntityId],
+    format: ExportFormat,
+) -> Result<Vec<ExportFile>> {
     let renderer = desktop.renderer();
     let rasterizer = desktop.rasterizer().await?;
-    let frames = try_join_all(pages.iter().map(|&page| renderer.render(&snapshot, page))).await?;
+    let frames = try_join_all(pages.iter().map(|&page| renderer.render(snapshot, page))).await?;
     let (extension, images) = match format {
         ExportFormat::Png | ExportFormat::Cbz => {
             let images = tokio_rayon::spawn(move || {
@@ -112,60 +179,121 @@ pub(crate) async fn export(
             let images = try_join_all(
                 frames
                     .iter()
-                    .map(|frame| export_page(Arc::clone(&rasterizer), &snapshot, frame, &options)),
+                    .map(|frame| export_page(Arc::clone(&rasterizer), snapshot, frame, &options)),
             )
             .await?;
             ("psd", images)
         }
     };
-    tokio_rayon::spawn(move || -> Result<()> {
-        let mut archive = if matches!(format, ExportFormat::Cbz) {
-            let directory = destination.parent().context("archive path has no parent")?;
-            Some(zip::ZipWriter::new(tempfile::NamedTempFile::new_in(
-                directory,
-            )?))
+    let order = snapshot.pages().map(|page| page.id()).collect::<Vec<_>>();
+    let width = order.len().to_string().len().max(4);
+    // Async preparation and indexed encoding both preserve the requested order.
+    pages
+        .iter()
+        .zip(images)
+        .map(|(&page, bytes)| {
+            let position = order
+                .iter()
+                .position(|candidate| *candidate == page)
+                .with_context(|| format!("{page} is not a page of this project"))?;
+            let label = snapshot.page(page)?.page()?.label;
+            Ok(ExportFile {
+                name: file_name(&label, position + 1, width, extension),
+                bytes,
+            })
+        })
+        .collect()
+}
+
+fn file_name(label: &str, number: usize, width: usize, extension: &str) -> String {
+    let name = label
+        .trim()
+        .trim_end_matches(|character: char| character == '.' || character.is_whitespace());
+    let name = name
+        .rsplit_once('.')
+        .map_or(name, |(stem, _)| stem)
+        .replace(['<', '>', ':', '"', '/', '\\', '|', '?', '*'], "_");
+    format!(
+        "{number:0width$}_{}.{extension}",
+        if name.is_empty() { "page" } else { &name }
+    )
+}
+
+/// Writes rendered pages into the `destination` folder, or into the archive at
+/// `destination` for CBZ, and returns the number of pages written.
+fn write_export(
+    files: Vec<ExportFile>,
+    format: ExportFormat,
+    destination: &Path,
+    overwrite: Overwrite,
+) -> Result<usize> {
+    let count = files.len();
+    let mut archive = if matches!(format, ExportFormat::Cbz) {
+        let directory = destination.parent().context("archive path has no parent")?;
+        Some(zip::ZipWriter::new(tempfile::NamedTempFile::new_in(
+            directory,
+        )?))
+    } else {
+        None
+    };
+    for file in files {
+        if let Some(archive) = &mut archive {
+            // PNG data is already compressed.
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            archive.start_file(file.name, options)?;
+            archive.write_all(&file.bytes)?;
         } else {
-            None
-        };
-        let width = pages.len().to_string().len().max(4);
-        // Async preparation and indexed encoding both preserve project order.
-        for (index, (page_id, bytes)) in pages.into_iter().zip(images).enumerate() {
-            let page = snapshot.page(page_id)?.page()?;
-            let name = page
-                .label
-                .trim()
-                .trim_end_matches(|character: char| character == '.' || character.is_whitespace());
-            let name = name
-                .rsplit_once('.')
-                .map_or(name, |(stem, _)| stem)
-                .replace(['<', '>', ':', '"', '/', '\\', '|', '?', '*'], "_");
-            let name = format!(
-                "{:0width$}_{}.{extension}",
-                index + 1,
-                if name.is_empty() { "page" } else { &name }
-            );
-            if let Some(archive) = &mut archive {
-                // PNG data is already compressed.
-                let options = zip::write::SimpleFileOptions::default()
-                    .compression_method(zip::CompressionMethod::Stored);
-                archive.start_file(name, options)?;
-                archive.write_all(&bytes)?;
-            } else {
-                std::fs::write(destination.join(name), bytes)?;
+            let path = destination.join(&file.name);
+            match overwrite {
+                Overwrite::Allow => std::fs::write(&path, &file.bytes)?,
+                Overwrite::Never => std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .and_then(|mut target| target.write_all(&file.bytes))
+                    .with_context(|| format!("failed to write {}", path.display()))?,
             }
-            tracing::info!(
-                target: "koharu_metrics",
-                metric = "page_exported",
-                format = ?format,
-            );
         }
-        if let Some(archive) = archive {
-            archive.finish()?.persist(destination)?;
+        tracing::info!(
+            target: "koharu_metrics",
+            metric = "page_exported",
+            format = ?format,
+        );
+    }
+    if let Some(archive) = archive {
+        let archive = archive.finish()?;
+        match overwrite {
+            Overwrite::Allow => {
+                archive.persist(destination)?;
+            }
+            Overwrite::Never => {
+                archive.persist_noclobber(destination)?;
+            }
         }
-        Ok(())
-    })
-    .await?;
-    Ok(())
+    }
+    Ok(count)
+}
+
+fn create_new_folder(root: &Path, name: &str) -> Result<PathBuf> {
+    std::fs::create_dir_all(root)
+        .with_context(|| format!("failed to create {}", root.display()))?;
+    for attempt in 1_usize.. {
+        let folder = if attempt == 1 {
+            root.join(name)
+        } else {
+            root.join(format!("{name}_{attempt}"))
+        };
+        match std::fs::create_dir(&folder) {
+            Ok(()) => return Ok(folder),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to create {}", folder.display()));
+            }
+        }
+    }
+    unreachable!("folder suffixes are unbounded")
 }
 
 #[tauri::command]
@@ -316,6 +444,76 @@ mod tests {
 
         let large = preview(&image, Some(bounds(0.0, 0.0, 2048.0, 1024.0))).unwrap();
         assert!((large.scale - 1536.0 / 2048.0).abs() < 1e-3);
+    }
+
+    fn files(names: &[&str]) -> Vec<ExportFile> {
+        names
+            .iter()
+            .map(|name| ExportFile {
+                name: (*name).to_owned(),
+                bytes: name.as_bytes().to_vec(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn export_names_number_pages_by_project_position() {
+        assert_eq!(file_name("cover.jpg", 3, 4, "png"), "0003_cover.png");
+        assert_eq!(file_name("a/b: c?.png ", 12, 4, "psd"), "0012_a_b_ c_.psd");
+        assert_eq!(file_name(" . ", 1, 5, "png"), "00001_page.png");
+    }
+
+    #[test]
+    fn agent_exports_go_to_new_folders_and_never_overwrite() {
+        let root = tempfile::tempdir().unwrap();
+
+        let first = create_new_folder(root.path(), "Project_2026-10-20_1200").unwrap();
+        let second = create_new_folder(root.path(), "Project_2026-10-20_1200").unwrap();
+        assert_eq!(first, root.path().join("Project_2026-10-20_1200"));
+        assert_eq!(second, root.path().join("Project_2026-10-20_1200_2"));
+
+        let written = write_export(
+            files(&["0001_a.png", "0002_b.png"]),
+            ExportFormat::Png,
+            &first,
+            Overwrite::Never,
+        )
+        .unwrap();
+        assert_eq!(written, 2);
+        assert!(
+            write_export(
+                files(&["0001_a.png"]),
+                ExportFormat::Png,
+                &first,
+                Overwrite::Never
+            )
+            .is_err()
+        );
+        assert_eq!(
+            std::fs::read(first.join("0001_a.png")).unwrap(),
+            b"0001_a.png"
+        );
+
+        let archive = second.join("Project.cbz");
+        write_export(
+            files(&["0001_a.png"]),
+            ExportFormat::Cbz,
+            &archive,
+            Overwrite::Never,
+        )
+        .unwrap();
+        assert!(
+            write_export(
+                files(&["0002_b.png"]),
+                ExportFormat::Cbz,
+                &archive,
+                Overwrite::Never
+            )
+            .is_err()
+        );
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&archive).unwrap()).unwrap();
+        assert_eq!(zip.len(), 1);
+        assert_eq!(zip.by_index(0).unwrap().name(), "0001_a.png");
     }
 
     #[test]

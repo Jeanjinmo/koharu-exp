@@ -311,9 +311,12 @@ export type LocalConfig = Record<string, never>;
 
 export type LoginEvent = { type: "progress"; message: string } | { type: "device_code"; verification_url: string; user_code: string };
 
-/**  Settings for the loopback MCP server, read once when the server starts. */
+/**  Settings for the agent tools served over MCP. */
 export type McpConfig = {
+	/**  Loopback port, read once when the server starts. */
 	port: number,
+	/**  Folder that receives agent exports; `None` uses `Documents/Koharu/exports`. */
+	export_dir: string | null,
 };
 
 export type MiniMaxConfig = Record<string, never>;

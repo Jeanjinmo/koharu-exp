@@ -4659,6 +4659,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.23.1",
+ "dirs 7.0.0",
  "eventsource-stream",
  "futures",
  "http-body-util",
@@ -4676,6 +4677,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "toml",
  "tracing",
  "uuid",
 ]
@@ -4688,6 +4690,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.23.1",
+ "chrono",
  "dirs 7.0.0",
  "futures",
  "hayro",

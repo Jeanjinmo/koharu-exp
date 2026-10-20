@@ -30,7 +30,7 @@ use crate::commands::{
     canvas::{CanvasChannel, Point},
     editing::{GeometryUpdate, TypographyUpdate},
     lifecycle::ProjectChannel,
-    output,
+    output::{self, ExportFormat},
     preferences::Preferences,
     processing::{JobId, Processing},
     project::{
@@ -600,6 +600,41 @@ impl Host for KoharuHost {
                 .await
             }
             "remove" => self.remove(arguments(&call)?, control).await,
+            "export" => {
+                let arguments: Export = arguments(&call)?;
+                let (name, snapshot) = {
+                    let current = self.handle.state::<CurrentProject>();
+                    let current = current.project.lock().await;
+                    let project = current.as_ref().context("no project is open")?;
+                    (project.name.clone(), project.snapshot())
+                };
+                let pages = if arguments.pages.is_empty() {
+                    snapshot.pages().map(|page| page.id()).collect()
+                } else {
+                    let requested = entities(&arguments.pages)?;
+                    for page in &requested {
+                        snapshot
+                            .page(*page)
+                            .with_context(|| format!("{page} is not a page"))?;
+                    }
+                    snapshot
+                        .pages()
+                        .map(|page| page.id())
+                        .filter(|page| requested.contains(page))
+                        .collect::<Vec<_>>()
+                };
+                let root = koharu_agent::Config::load()?.read()?.mcp.export_folder()?;
+                let exported = output::export_to_new_folder(
+                    &self.handle.state::<Desktop>(),
+                    &snapshot,
+                    &name,
+                    &pages,
+                    arguments.format.into(),
+                    &root,
+                )
+                .await?;
+                Invocation::read(json!({ "path": exported.path, "files": exported.files }))
+            }
             "erase" => {
                 let arguments: Erase = arguments(&call)?;
                 let page = entity(&arguments.page)?;
@@ -858,6 +893,11 @@ fn tools() -> &'static [Tool] {
                         ..metadata(ToolGroup::Image)
                     },
                 ),
+                definition::<Export>(
+                    "export",
+                    "Export pages as PNG, PSD, or CBZ into a new folder named after the project and the time, inside Koharu's export folder. Existing files are never replaced. Returns the path and the number of files; PNG and PSD write one file per page.",
+                    metadata(ToolGroup::Output),
+                ),
                 definition::<RunPipeline>(
                     "run_pipeline",
                     "Run Koharu's configured processing pipeline for the whole project, selected pages, or selected text elements.",
@@ -1032,6 +1072,32 @@ struct Erase {
     layer: String,
     #[serde(flatten)]
     area: AreaArguments,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct Export {
+    format: AgentExportFormat,
+    /// Pages to export, written in project order. Omit to export every page.
+    #[serde(default)]
+    pages: Vec<String>,
+}
+
+#[derive(Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum AgentExportFormat {
+    Png,
+    Psd,
+    Cbz,
+}
+
+impl From<AgentExportFormat> for ExportFormat {
+    fn from(value: AgentExportFormat) -> Self {
+        match value {
+            AgentExportFormat::Png => Self::Png,
+            AgentExportFormat::Psd => Self::Psd,
+            AgentExportFormat::Cbz => Self::Cbz,
+        }
+    }
 }
 
 /// An axis-aligned rectangle in page pixels.
