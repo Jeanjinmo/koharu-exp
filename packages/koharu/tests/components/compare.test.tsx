@@ -135,11 +135,13 @@ describe('compare', () => {
     renderWorkspace()
 
     const original = await screen.findByRole('img', { name: 'Original' })
-    expect(original).toHaveStyle({ clipPath: 'inset(0 50% 0 0)' })
+    const clip = screen.getByTestId('compare-slider-clip')
+    expect(clip).toContainElement(original)
+    expect(clip).toHaveStyle({ clipPath: 'inset(0 50% 0 0)' })
     fireEvent.keyDown(screen.getByRole('slider', { name: 'Comparison divider' }), {
       key: 'ArrowRight',
     })
-    await waitFor(() => expect(original).toHaveStyle({ clipPath: 'inset(0 48% 0 0)' }))
+    await waitFor(() => expect(clip).toHaveStyle({ clipPath: 'inset(0 48% 0 0)' }))
   })
 
   it('turns on from the status bar and picks a mode there', async () => {

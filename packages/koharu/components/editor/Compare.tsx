@@ -53,17 +53,7 @@ function useOriginal(page: string | undefined) {
 }
 
 /** Draws the original with the editor's camera, so it lines up with the canvas. */
-function Original({
-  page,
-  url,
-  camera,
-  clip,
-}: {
-  page: Page
-  url: string
-  camera: Camera
-  clip?: string
-}) {
+function Original({ page, url, camera }: { page: Page; url: string; camera: Camera }) {
   const { t } = useTranslation()
   const dpr = window.devicePixelRatio
   return (
@@ -77,7 +67,6 @@ function Original({
         width: page.size.width,
         height: page.size.height,
         transform: `translate(${camera.translation[0] / dpr}px, ${camera.translation[1] / dpr}px) scale(${camera.zoom / dpr})`,
-        clipPath: clip,
       }}
     />
   )
@@ -196,14 +185,15 @@ export function CompareOverlay({ page }: { page: Page }) {
 
   return (
     <>
-      {url && (
-        <Original
-          page={page}
-          url={url}
-          camera={camera}
-          clip={`inset(0 ${(1 - compare.split) * 100}% 0 0)`}
-        />
-      )}
+      {/* The clip spans the whole surface, as the divider does, so the two
+          meet wherever the page sits in the view. */}
+      <div
+        data-testid='compare-slider-clip'
+        className='pointer-events-none absolute inset-0 overflow-hidden'
+        style={{ clipPath: `inset(0 ${(1 - compare.split) * 100}% 0 0)` }}
+      >
+        {url && <Original page={page} url={url} camera={camera} />}
+      </div>
       <div
         data-canvas-control
         role='slider'
