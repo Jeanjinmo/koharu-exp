@@ -12,7 +12,7 @@ Caranya: Koharu diberi **server MCP** yang membuka 14 tool agent yang sudah ada 
 
 - **Fase 1 (selesai, branch `feat/agent-mcp`): server MCP.** Terverifikasi di PC pemilik; branch ini dibekukan sebagai basis.
 - **Fase 2: dilewati.** Jangan dikerjakan.
-- **Fase 3 (sekarang, branch `feat/custom`): kustomisasi pribadi.** Spesifikasi lengkap ada di **`PRD-FASE3.md`**; dikerjakan per gelombang (3A–3E). Atas keputusan pemilik (2026-10-20), 3B–3E dikerjakan berurutan tanpa menunggu uji per gelombang; pemilik menguji semuanya di akhir dengan manual uji.
+- **Fase 3 (sekarang, branch `feat/custom`): kustomisasi pribadi.** Spesifikasi lengkap ada di **`PRD-FASE3.md`**; dikerjakan per gelombang (3A–3E). Atas keputusan pemilik (2026-10-20), 3B–3E dikerjakan berurutan tanpa menunggu uji per gelombang; pemilik menguji semuanya di akhir dengan manual uji **`MANUAL-UJI-FASE3.md`**.
 
 Fork ini untuk **pemakaian pribadi jangka panjang**. Kecocokan dengan Koharu resmi tidak dipertimbangkan.
 

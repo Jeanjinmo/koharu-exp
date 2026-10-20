@@ -2,7 +2,7 @@
 
 Dokumen kebutuhan produk untuk Fase 3 fork pribadi `Jeanjinmo/koharu-exp`. Dibaca bersama `EXP-PLAN.md` (aturan, lingkungan, hasil audit). **Baca keduanya seluruhnya sebelum mengubah kode.**
 
-- Status: **disetujui pemilik, siap dikerjakan per gelombang** (lihat §4).
+- Status: **gelombang 3A–3E selesai dikerjakan (2026-10-20); menunggu uji pemilik** memakai `MANUAL-UJI-FASE3.md`.
 - Keputusan pemilik (2026-10-20): setelah 3A, gelombang 3B–3E dikerjakan **berturut-turut tanpa menunggu uji pemilik per gelombang**. Pemilik menguji semuanya sekaligus di akhir memakai manual uji yang diserahkan sesi pengerja, dan mencatat bug yang ditemukan. Aturan lain tetap berlaku.
 - Branch kerja: `feat/custom` (dari `feat/agent-mcp` @ `4ff6409d`). `feat/agent-mcp` dibekukan sebagai basis Fase 1.
 - Basis kode tetap tag `0.83.5`.
