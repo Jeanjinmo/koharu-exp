@@ -34,7 +34,8 @@ use crate::commands::{
     preferences::Preferences,
     processing::{JobId, Processing},
     project::{
-        CurrentProject, Project, ProjectInfo, RasterStrokeMode, TranslationUpdate, Typography,
+        CurrentProject, Layer, Project, ProjectInfo, RasterStrokeMode, TranslationUpdate,
+        Typography,
     },
 };
 
@@ -194,16 +195,29 @@ impl KoharuHost {
 
     async fn run_pipeline(&self, arguments: RunPipeline, control: &Control) -> Result<Invocation> {
         let scope = arguments.scope()?;
+        let region_page = match scope {
+            Scope::Region { page, .. } => Some(page),
+            _ => None,
+        };
+        let before = match region_page {
+            Some(page) => text_elements(&self.snapshot().await?, page)?,
+            None => BTreeSet::new(),
+        };
         let report = self
             .process(scope, arguments.operation.into(), None, control)
             .await?;
-        Invocation::changed(json!({
+        let mut result = json!({
             "base_revision": report.base,
             "final_revision": report.final_revision,
             "completed": report.completed,
             "total": report.total,
             "elapsed_ms": report.elapsed.as_millis(),
-        }))
+        });
+        if let Some(page) = region_page {
+            let after = text_elements(&self.snapshot().await?, page)?;
+            result["added_elements"] = json!(after.difference(&before).collect::<Vec<_>>());
+        }
+        Invocation::changed(result)
     }
 
     /// Inpaints only the given area of a page into its cleanup layer.
@@ -900,7 +914,7 @@ fn tools() -> &'static [Tool] {
                 ),
                 definition::<RunPipeline>(
                     "run_pipeline",
-                    "Run Koharu's configured processing pipeline for the whole project, selected pages, or selected text elements.",
+                    "Run Koharu's configured processing pipeline for the whole project, selected pages, selected text elements, or one region of a page. A region run reports the text elements it added; use it with the detection operation to pick up text that was missed.",
                     ToolMetadata {
                         mutates_image: true,
                         ..metadata(ToolGroup::Pipeline)
@@ -967,6 +981,17 @@ fn hex_color(value: &str) -> Result<[u8; 4]> {
     color
         .and_then(|color| color.try_into().ok())
         .with_context(|| format!("{value:?} is not a #RRGGBB or #RRGGBBAA color"))
+}
+
+fn text_elements(snapshot: &Snapshot, page: EntityId) -> Result<BTreeSet<EntityId>> {
+    Ok(Project::page(snapshot, page)?
+        .layers
+        .into_iter()
+        .filter_map(|layer| match layer {
+            Layer::Text { id, .. } => Some(id),
+            _ => None,
+        })
+        .collect())
 }
 
 fn page_pixels(snapshot: &Snapshot, page: EntityId) -> Result<(u32, u32)> {
@@ -1312,15 +1337,34 @@ struct RunPipeline {
     pages: Vec<String>,
     #[serde(default)]
     elements: Vec<String>,
+    /// One area of one page, for example to detect text that was missed
+    /// there. Detection only runs when the area overlaps no existing text and
+    /// no speech bubble that already holds text.
+    region: Option<PageRegion>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct PageRegion {
+    page: String,
+    #[serde(flatten)]
+    rect: Rect,
 }
 
 impl RunPipeline {
     fn scope(&self) -> Result<Scope> {
-        match (self.pages.is_empty(), self.elements.is_empty()) {
-            (true, true) => Ok(Scope::Project),
-            (false, true) => Ok(Scope::Pages(entities(&self.pages)?)),
-            (true, false) => Ok(Scope::Entities(entities(&self.elements)?)),
-            (false, false) => bail!("pipeline scope cannot contain both pages and elements"),
+        match (
+            self.pages.is_empty(),
+            self.elements.is_empty(),
+            &self.region,
+        ) {
+            (true, true, None) => Ok(Scope::Project),
+            (false, true, None) => Ok(Scope::Pages(entities(&self.pages)?)),
+            (true, false, None) => Ok(Scope::Entities(entities(&self.elements)?)),
+            (true, true, Some(region)) => Ok(Scope::Region {
+                page: entity(&region.page)?,
+                bounds: region.rect.into(),
+            }),
+            _ => bail!("give at most one of pages, elements, or region"),
         }
     }
 }
@@ -1330,6 +1374,43 @@ mod tests {
     use koharu_renderer::RenderBounds;
 
     use super::*;
+
+    fn run_pipeline(arguments: Value) -> RunPipeline {
+        serde_json::from_value(arguments).unwrap()
+    }
+
+    #[test]
+    fn pipeline_regions_scope_one_area_of_one_page() {
+        let page = EntityId::new();
+        let scope = run_pipeline(json!({
+            "operation": "detection",
+            "region": { "page": page, "x": 10.0, "y": 20.0, "width": 30.0, "height": 40.0 },
+        }))
+        .scope()
+        .unwrap();
+
+        assert_eq!(
+            scope,
+            Scope::Region {
+                page,
+                bounds: Bounds {
+                    x: 10.0,
+                    y: 20.0,
+                    width: 30.0,
+                    height: 40.0,
+                },
+            }
+        );
+        assert!(
+            run_pipeline(json!({
+                "operation": "detection",
+                "pages": [page],
+                "region": { "page": page, "x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0 },
+            }))
+            .scope()
+            .is_err()
+        );
+    }
 
     #[test]
     fn hex_colors_parse_with_or_without_alpha() {

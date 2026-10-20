@@ -99,13 +99,21 @@ impl StageProcessor for Processor {
         MODEL_NAME
     }
 
+    // Detection replaces the regions in its scope. It never runs where that
+    // would replace text, or a bubble that existing text sits inside or flows
+    // into, so a region run only adds what was missed.
     fn skip(&self, input: &StageInput) -> Result<bool> {
         for entity in input.scene.descendants(input.page)? {
             let id = entity.id();
-            if input.contains_entity(id)?
-                && entity
-                    .component::<Region>()?
-                    .is_some_and(|region| region.kind == TextRegion::kind())
+            if !input.contains_entity(id)? {
+                continue;
+            }
+            let Some(region) = entity.component::<Region>()? else {
+                continue;
+            };
+            if region.kind == TextRegion::kind()
+                || input.scene.relations_to_as::<Inside>(id).next().is_some()
+                || input.scene.relations_to_as::<FlowsIn>(id).next().is_some()
             {
                 return Ok(true);
             }
@@ -1902,6 +1910,68 @@ mod tests {
         );
 
         assert!(processor.skip(&input).unwrap());
+    }
+
+    #[tokio::test]
+    async fn region_detection_only_runs_where_it_cannot_replace_existing_text() {
+        let mut session = Session::memory().await.unwrap();
+        let mut ids = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                let page = edit.add_page(PageDraft::new("page", 300.0, 100.0), At::End)?;
+                let occupied = edit.add_analysis_region::<BubbleRegion>(
+                    page,
+                    At::End,
+                    &Geometry::rectangle(0.0, 0.0, 100.0, 100.0),
+                    None,
+                )?;
+                let text = edit.add_analysis_region::<TextRegion>(
+                    page,
+                    At::End,
+                    &Geometry::rectangle(60.0, 60.0, 20.0, 20.0),
+                    None,
+                )?;
+                edit.relate::<Inside>(text, occupied)?;
+                edit.add_analysis_region::<BubbleRegion>(
+                    page,
+                    At::End,
+                    &Geometry::rectangle(200.0, 0.0, 100.0, 100.0),
+                    None,
+                )?;
+                ids = Some(page);
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let page = ids.unwrap();
+        let processor = Processor::new(
+            DetectionModel::KoharuLayoutRFDetrSeg2XL(KoharuLayoutRFDetrSeg2XLConfig::default()),
+            koharu_ml::Device::cpu(),
+        );
+        let skips = |x: f64| {
+            processor
+                .skip(&StageInput::new(
+                    snapshot.clone(),
+                    page,
+                    None,
+                    Some(crate::Bounds {
+                        x,
+                        y: 10.0,
+                        width: 20.0,
+                        height: 20.0,
+                    }),
+                    std::sync::Arc::new(crate::ImageCache::default()),
+                    None,
+                ))
+                .unwrap()
+        };
+
+        // The area misses the text itself but would replace the bubble it sits in.
+        assert!(skips(10.0));
+        // An empty bubble and blank artwork can be detected again.
+        assert!(!skips(210.0));
+        assert!(!skips(130.0));
     }
 
     #[tokio::test]
