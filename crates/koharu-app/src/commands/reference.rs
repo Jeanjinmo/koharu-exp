@@ -13,7 +13,7 @@ use image::{
     codecs::jpeg::JpegEncoder, imageops::FilterType,
 };
 use koharu_desktop::Desktop;
-use koharu_scene::{AssetInput, AssetMetadata, EntityId, LanguageTag};
+use koharu_scene::{AssetInput, AssetMetadata, EntityId, LanguageTag, ReferencePlacement};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -196,6 +196,29 @@ pub(crate) async fn detach_references(
         let mut project = project.project.lock().await;
         let project = project.as_mut().context("no project is open")?;
         let commit = project.detach_references(pages).await?;
+        project.record_commit(&commit);
+        (commit, project.active_page())
+    };
+    desktop.synchronize(&commit.snapshot, page, &commit).await?;
+    canvas_channel.channel.publish(desktop.canvas_state());
+    Ok(())
+}
+
+/// Places the references of `pages` in one undoable step, for example the
+/// alignment of one page applied to the pages after it.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_reference_placement(
+    pages: Vec<EntityId>,
+    placement: ReferencePlacement,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> std::result::Result<(), Error> {
+    let (commit, page) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        let commit = project.place_references(pages, placement).await?;
         project.record_commit(&commit);
         (commit, project.active_page())
     };

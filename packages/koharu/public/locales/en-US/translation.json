@@ -104,6 +104,9 @@
     "noOriginal": "This page has no original image.",
     "original": "Original",
     "peekHint": "Hold {{key}} to see the original",
+    "peekReferenceHint": "Hold {{key}} to see the reference",
+    "reference": "Reference",
+    "subject": "Compare with",
     "title": "Compare"
   },
   "errors": {
@@ -703,6 +706,27 @@
     "remove": "Remove",
     "select": "Select",
     "text": "Text"
+  },
+  "tracing": {
+    "align": "Align reference…",
+    "applied_one": "Aligned 1 page",
+    "applied_other": "Aligned {{count}} pages",
+    "applyFollowing": "Apply to following pages",
+    "close": "Close alignment",
+    "grow": "Enlarge the reference",
+    "height": "Height",
+    "hint": "Drag to move. Alt+wheel resizes around the pointer; arrow keys nudge (Shift for 10 px). Positions are page pixels. Switching pages saves this page's alignment.",
+    "noReference": "This page has no reference.",
+    "opacity": "Reference opacity",
+    "reset": "Fit to page",
+    "save": "Save",
+    "shrink": "Shrink the reference",
+    "size": "Size",
+    "surface": "Reference alignment",
+    "title": "Align reference",
+    "width": "Width",
+    "x": "X",
+    "y": "Y"
   },
   "updater": {
     "available": {

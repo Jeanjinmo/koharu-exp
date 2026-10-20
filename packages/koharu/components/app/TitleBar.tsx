@@ -64,6 +64,8 @@ export function TitleBar() {
   const setCompareOpen = useKoharuStore((state) => state.setCompareOpen)
   const compareShortcut = useKoharuStore((state) => state.shortcuts.compare)
   const requestCanvasFit = useKoharuStore((state) => state.requestCanvasFit)
+  const startTracing = useKoharuStore((state) => state.startTracing)
+  const reference = pages.find((candidate) => candidate.id === page?.id)?.reference ?? null
   const { importPages, importing } = useImportPages()
   const { run: exportProject, busy: exporting } = useCommand(
     ['export-project'],
@@ -274,6 +276,12 @@ export function TitleBar() {
               <MenubarItem disabled={!page} onClick={() => setCompareOpen(!compareOpen)}>
                 {compareOpen ? t('compare.close') : t('compare.title')}
                 <MenubarShortcut>{compareShortcut.toUpperCase()}</MenubarShortcut>
+              </MenubarItem>
+              <MenubarItem
+                disabled={!page || !reference}
+                onClick={() => page && reference && startTracing(page.id, reference.placement)}
+              >
+                {t('tracing.align')}
               </MenubarItem>
             </MenubarContent>
           </MenubarMenu>

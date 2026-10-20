@@ -8,7 +8,7 @@ use koharu_pipeline::Bounds;
 use koharu_psd::{PsdExportOptions, export_page};
 use koharu_rasterizer::{Raster, RasterOptions, Rasterizer};
 use koharu_renderer::{Frame, Renderer};
-use koharu_scene::{AssetRole, EntityId, Snapshot};
+use koharu_scene::{AssetRole, EntityId, PageReference, Snapshot};
 use rayon::prelude::*;
 use serde::Deserialize;
 use specta::Type;
@@ -51,6 +51,8 @@ impl IpcResponse for ImageBytes {
 pub enum PageImage {
     /// The original artwork the page was imported from.
     Source,
+    /// The translated edition attached to the page.
+    Reference,
 }
 
 /// Image types the webview decodes; other stored types are converted to PNG.
@@ -374,6 +376,7 @@ pub(crate) async fn get_page_image(
     snapshot.page(page)?;
     let role = match image {
         PageImage::Source => "source",
+        PageImage::Reference => PageReference::ASSET_ROLE,
     };
     let asset = snapshot
         .asset(page, &AssetRole::new(role)?)?

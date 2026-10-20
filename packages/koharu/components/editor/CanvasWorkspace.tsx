@@ -9,6 +9,7 @@ import { CanvasOverlay } from '@/components/editor/CanvasOverlay'
 import { CompareOverlay, ComparePane } from '@/components/editor/Compare'
 import { StatusBar } from '@/components/editor/StatusBar'
 import { ToolBar } from '@/components/editor/ToolBar'
+import { TracingOverlay, TracingPanel } from '@/components/editor/Tracing'
 import { useCanvas } from '@/components/editor/useCanvas'
 import { call } from '@/lib/backend'
 import { clamp, clampCameraTranslation, containCamera, wheelCamera } from '@/lib/camera'
@@ -347,7 +348,12 @@ export function CanvasWorkspace() {
         return
       }
       const command = event.ctrlKey || event.metaKey
-      if (!command && !event.altKey && event.key.toLowerCase() === state.shortcuts.compare) {
+      if (
+        !command &&
+        !event.altKey &&
+        !state.tracing &&
+        event.key.toLowerCase() === state.shortcuts.compare
+      ) {
         event.preventDefault()
         if (event.repeat) return
         // Hold to peek shows the original only while the key is down.
@@ -774,6 +780,8 @@ export function CanvasWorkspace() {
               onTransformEnd={finishTransform}
             />
           )}
+          {page && canvasState.status === 'ready' && <TracingOverlay page={page} />}
+          {page && <TracingPanel page={page} />}
           {page && canvasState.status === 'error' && (
             <div
               role='alert'

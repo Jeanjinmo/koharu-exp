@@ -474,6 +474,35 @@ impl Project {
         self.commit(patch).await
     }
 
+    /// Places the references of `pages` in one commit.
+    pub(crate) async fn place_references(
+        &mut self,
+        pages: Vec<EntityId>,
+        placement: ReferencePlacement,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        let mut references = Vec::with_capacity(pages.len());
+        for page in pages {
+            let reference = snapshot
+                .component::<PageReference>(page)?
+                .with_context(|| format!("page {page} has no reference"))?;
+            references.push((page, reference));
+        }
+        let patch = snapshot.patch(|edit| {
+            for (page, reference) in references {
+                edit.set(
+                    page,
+                    &PageReference {
+                        placement,
+                        ..reference
+                    },
+                )?;
+            }
+            Ok(())
+        })?;
+        self.commit(patch).await
+    }
+
     pub(crate) async fn delete_pages(&mut self, pages: Vec<EntityId>) -> Result<Commit> {
         let snapshot = self.snapshot();
         let pages = Self::unique_roots(&snapshot, pages)?;
@@ -1743,6 +1772,70 @@ mod tests {
         assert!(reference(&project).is_none());
         let role = AssetRole::new(PageReference::ASSET_ROLE).unwrap();
         assert!(project.snapshot().asset(page, &role).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn reference_placement_applies_to_every_page_in_one_step() {
+        let (mut project, first, _) = project_with_text(0).await;
+        let patch = project
+            .snapshot()
+            .patch(|edit| {
+                edit.add_page(PageDraft::new("second", 100.0, 100.0), At::End)
+                    .map(|_| ())
+            })
+            .unwrap();
+        project.commit(patch).await.unwrap();
+        let pages = project
+            .snapshot()
+            .pages()
+            .map(|page| page.id())
+            .collect::<Vec<_>>();
+        let image = || {
+            AssetInput::new(
+                &b"reference"[..],
+                "image/jpeg",
+                AssetMetadata {
+                    width: Some(80),
+                    height: Some(120),
+                    attributes: Default::default(),
+                },
+            )
+        };
+        project
+            .attach_references(
+                pages.iter().map(|page| (*page, image())).collect(),
+                LanguageTag::new("en-US").unwrap(),
+            )
+            .await
+            .unwrap();
+        let shifted = ReferencePlacement {
+            x: 0.02,
+            y: -0.01,
+            width: 0.97,
+            height: 1.03,
+        };
+
+        let commit = project
+            .place_references(pages.clone(), shifted)
+            .await
+            .unwrap();
+        project.record_commit(&commit);
+        for summary in Project::pages(&project.snapshot()).unwrap() {
+            let reference = summary.reference.unwrap();
+            assert_eq!(reference.placement, shifted);
+            assert_eq!(reference.language, "en-US");
+        }
+        project.undo().await.unwrap();
+        assert!(
+            Project::pages(&project.snapshot())
+                .unwrap()
+                .iter()
+                .all(|summary| summary.reference.as_ref().unwrap().placement
+                    == ReferencePlacement::FILL)
+        );
+
+        project.detach_references(vec![first]).await.unwrap();
+        assert!(project.place_references(pages, shifted).await.is_err());
     }
 
     #[tokio::test]

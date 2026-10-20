@@ -8,32 +8,35 @@ import { useTranslation } from 'react-i18next'
 import { call } from '@/lib/backend'
 import { clampCameraTranslation, wheelCamera } from '@/lib/camera'
 import type { Camera } from '@/lib/geometry'
-import { usePages } from '@/lib/queries'
-import { compareModes, useKoharuStore } from '@/lib/store'
-import { commands, type Page } from '@koharu/bridge/protocol'
+import { usePage, usePages } from '@/lib/queries'
+import { compareModes, useKoharuStore, type CompareSubject } from '@/lib/store'
+import {
+  commands,
+  type Page,
+  type PageImage,
+  type PageSize,
+  type ReferencePlacement,
+} from '@koharu/bridge/protocol'
 import { Button } from '@koharu/ui/components/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@koharu/ui/components/dropdown-menu'
 import { cn } from '@koharu/ui/lib/utils'
 
-/**
- * The page's original artwork as an image URL. It is the page's source asset,
- * so showing it never changes the project or its layer visibility.
- */
-function useOriginal(page: string | undefined) {
-  const pages = usePages(page !== undefined).data
-  const asset = pages?.find((candidate) => candidate.id === page)?.source_asset ?? null
+/** One of a page's images at full resolution, as an object URL. */
+export function usePageImage(page: string, image: PageImage, asset: string | null) {
   const bytes = useQuery({
-    queryKey: ['page-image', page, 'source', asset],
-    queryFn: async () => new Uint8Array(await call(commands.getPageImage, page!, 'source')),
-    enabled: page !== undefined && asset !== null,
+    queryKey: ['page-image', page, image, asset],
+    queryFn: async () => new Uint8Array(await call(commands.getPageImage, page, image)),
+    enabled: asset !== null,
     staleTime: Number.POSITIVE_INFINITY,
     gcTime: 60 * 1000,
   }).data
@@ -49,24 +52,85 @@ function useOriginal(page: string | undefined) {
     return () => URL.revokeObjectURL(next)
   }, [bytes])
 
-  return { url, missing: pages !== undefined && asset === null }
+  return url
 }
 
-/** Draws the original with the editor's camera, so it lines up with the canvas. */
-function Original({ page, url, camera }: { page: Page; url: string; camera: Camera }) {
+export interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** Where a reference lies over a page, in page pixels. */
+export function placedRect(placement: ReferencePlacement, size: PageSize): Rect {
+  return {
+    x: placement.x * size.width,
+    y: placement.y * size.height,
+    width: placement.width * size.width,
+    height: placement.height * size.height,
+  }
+}
+
+/**
+ * What Compare shows beside the result: the page's reference when it has one
+ * and Compare is set to it, otherwise the original artwork. Both are page
+ * assets, so showing them never changes the project or layer visibility.
+ * The image loads only while `shown`.
+ */
+function useComparison(page: Page, shown: boolean) {
   const { t } = useTranslation()
+  const summary = usePages().data?.find((candidate) => candidate.id === page.id)
+  const subject = useKoharuStore((state) => state.compare.subject)
+  const reference = subject === 'reference' ? (summary?.reference ?? null) : null
+  const asset = reference ? reference.asset : (summary?.source_asset ?? null)
+  const url = usePageImage(page.id, reference ? 'reference' : 'source', shown ? asset : null)
+  return reference
+    ? {
+        reference: true,
+        url,
+        label: t('compare.reference'),
+        rect: placedRect(reference.placement, page.size),
+        missing: false,
+      }
+    : {
+        reference: false,
+        url,
+        label: t('compare.original'),
+        rect: { x: 0, y: 0, width: page.size.width, height: page.size.height },
+        missing: summary !== undefined && summary.source_asset === null,
+      }
+}
+
+/** Draws a page image with the editor's camera, so it lines up with the canvas. */
+export function PlacedImage({
+  url,
+  rect,
+  camera,
+  label,
+  opacity,
+}: {
+  url: string
+  rect: Rect
+  camera: Camera
+  label: string
+  opacity?: number
+}) {
   const dpr = window.devicePixelRatio
+  const x = camera.translation[0] + rect.x * camera.zoom
+  const y = camera.translation[1] + rect.y * camera.zoom
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={url}
-      alt={t('compare.original')}
+      alt={label}
       draggable={false}
       className='pointer-events-none absolute top-0 left-0 max-w-none origin-top-left select-none'
       style={{
-        width: page.size.width,
-        height: page.size.height,
-        transform: `translate(${camera.translation[0] / dpr}px, ${camera.translation[1] / dpr}px) scale(${camera.zoom / dpr})`,
+        width: rect.width,
+        height: rect.height,
+        opacity,
+        transform: `translate(${x / dpr}px, ${y / dpr}px) scale(${camera.zoom / dpr})`,
       }}
     />
   )
@@ -79,7 +143,7 @@ function Original({ page, url, camera }: { page: Page; url: string; camera: Came
 export function ComparePane({ page }: { page: Page }) {
   const { t } = useTranslation()
   const camera = useKoharuStore((state) => state.camera)
-  const { url, missing } = useOriginal(page.id)
+  const comparison = useComparison(page, true)
   const pan = useRef<{ pointer: number; x: number; y: number; translation: [number, number] }>(null)
 
   const move = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -105,7 +169,7 @@ export function ComparePane({ page }: { page: Page }) {
 
   return (
     <section
-      aria-label={t('compare.original')}
+      aria-label={comparison.label}
       className='relative min-h-0 min-w-0 flex-1 cursor-grab touch-none overflow-hidden border-r border-border/80 bg-[var(--surface-canvas)]'
       onWheel={(event) => {
         event.preventDefault()
@@ -139,14 +203,21 @@ export function ComparePane({ page }: { page: Page }) {
         pan.current = null
       }}
     >
-      {url && <Original page={page} url={url} camera={camera} />}
-      {missing && (
+      {comparison.url && (
+        <PlacedImage
+          url={comparison.url}
+          rect={comparison.rect}
+          camera={camera}
+          label={comparison.label}
+        />
+      )}
+      {comparison.missing && (
         <p className='absolute inset-0 grid place-items-center text-[12px] text-muted-foreground'>
           {t('compare.noOriginal')}
         </p>
       )}
       <span className='pointer-events-none absolute top-2 left-2 rounded-md bg-background/85 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm'>
-        {t('compare.original')}
+        {comparison.label}
       </span>
     </section>
   )
@@ -162,17 +233,28 @@ export function CompareOverlay({ page }: { page: Page }) {
   const camera = useKoharuStore((state) => state.camera)
   const shortcut = useKoharuStore((state) => state.shortcuts.compare)
   const setSplit = useKoharuStore((state) => state.setCompareSplit)
-  const { url } = useOriginal(page.id)
+  const comparison = useComparison(page, compare.open && compare.mode !== 'side_by_side')
   const dragging = useRef<number | null>(null)
 
   if (!compare.open || compare.mode === 'side_by_side') return null
 
+  const image = comparison.url && (
+    <PlacedImage
+      url={comparison.url}
+      rect={comparison.rect}
+      camera={camera}
+      label={comparison.label}
+    />
+  )
+
   if (compare.mode === 'peek') {
     return compare.peeking ? (
-      url && <Original page={page} url={url} camera={camera} />
+      image
     ) : (
       <span className='pointer-events-none absolute bottom-2 left-1/2 z-10 -translate-x-1/2 rounded-md bg-background/85 px-2 py-0.5 text-[10px] text-muted-foreground shadow-sm'>
-        {t('compare.peekHint', { key: shortcut.toUpperCase() })}
+        {t(comparison.reference ? 'compare.peekReferenceHint' : 'compare.peekHint', {
+          key: shortcut.toUpperCase(),
+        })}
       </span>
     )
   }
@@ -192,7 +274,7 @@ export function CompareOverlay({ page }: { page: Page }) {
         className='pointer-events-none absolute inset-0 overflow-hidden'
         style={{ clipPath: `inset(0 ${(1 - compare.split) * 100}% 0 0)` }}
       >
-        {url && <Original page={page} url={url} camera={camera} />}
+        {image}
       </div>
       <div
         data-canvas-control
@@ -233,12 +315,16 @@ export function CompareOverlay({ page }: { page: Page }) {
   )
 }
 
-/** Turns Compare on and off and picks how it shows the original. */
+/** Turns Compare on and off and picks how and with what it compares. */
 export function CompareButton() {
   const { t } = useTranslation()
   const compare = useKoharuStore((state) => state.compare)
   const setOpen = useKoharuStore((state) => state.setCompareOpen)
   const setMode = useKoharuStore((state) => state.setCompareMode)
+  const setSubject = useKoharuStore((state) => state.setCompareSubject)
+  const startTracing = useKoharuStore((state) => state.startTracing)
+  const active = usePage().data?.id
+  const reference = usePages().data?.find((page) => page.id === active)?.reference ?? null
   return (
     <div className='flex items-center'>
       <Button
@@ -283,6 +369,32 @@ export function CompareButton() {
               ))}
             </DropdownMenuRadioGroup>
           </DropdownMenuGroup>
+          {active && reference && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>{t('compare.subject')}</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={compare.subject}
+                  onValueChange={(subject) => {
+                    setSubject(subject as CompareSubject)
+                    setOpen(true)
+                  }}
+                >
+                  <DropdownMenuRadioItem value='reference'>
+                    {t('compare.reference')}
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value='original'>
+                    {t('compare.original')}
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => startTracing(active, reference.placement)}>
+                {t('tracing.align')}
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

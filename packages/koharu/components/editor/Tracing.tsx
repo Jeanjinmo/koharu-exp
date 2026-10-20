@@ -1,0 +1,334 @@
+'use client'
+
+import { Minus, Plus, X } from 'lucide-react'
+import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useTranslation } from 'react-i18next'
+
+import { PlacedImage, placedRect, usePageImage } from '@/components/editor/Compare'
+import { call } from '@/lib/backend'
+import { pagesKey, projectKey, refresh, usePages } from '@/lib/queries'
+import { useKoharuStore } from '@/lib/store'
+import { commands, type Page, type ReferencePlacement } from '@koharu/bridge/protocol'
+import { Button } from '@koharu/ui/components/button'
+import { Input } from '@koharu/ui/components/input'
+import { toast } from '@koharu/ui/components/toast'
+
+const FILL: ReferencePlacement = { x: 0, y: 0, width: 1, height: 1 }
+
+/** Scales a placement by `factor` around a point given in page fractions. */
+function scaled(placement: ReferencePlacement, factor: number, x: number, y: number) {
+  return {
+    x: x - (x - placement.x) * factor,
+    y: y - (y - placement.y) * factor,
+    width: placement.width * factor,
+    height: placement.height * factor,
+  }
+}
+
+async function savePlacement(pages: string[], placement: ReferencePlacement) {
+  await call(commands.setReferencePlacement, pages, placement)
+  await refresh(projectKey, pagesKey)
+}
+
+/**
+ * Aligning a reference by hand: the reference, partly transparent, over the
+ * page's original artwork. Dragging moves it, Alt+wheel resizes it around the
+ * pointer, and the arrow keys nudge it. Other wheel input still moves the
+ * camera, so the alignment can be checked up close.
+ */
+export function TracingOverlay({ page }: { page: Page }) {
+  const { t } = useTranslation()
+  const tracing = useKoharuStore((state) => state.tracing)
+  const camera = useKoharuStore((state) => state.camera)
+  const moveTracing = useKoharuStore((state) => state.moveTracing)
+  const summary = usePages().data?.find((candidate) => candidate.id === page.id)
+  const active = tracing?.page === page.id ? tracing : null
+  const source = usePageImage(page.id, 'source', active ? (summary?.source_asset ?? null) : null)
+  const reference = usePageImage(
+    page.id,
+    'reference',
+    active ? (summary?.reference?.asset ?? null) : null,
+  )
+  const drag = useRef<{
+    pointer: number
+    x: number
+    y: number
+    placement: ReferencePlacement
+  } | null>(null)
+  const surface = useRef<HTMLDivElement>(null)
+
+  // Focus the overlay when aligning starts, so the arrow keys nudge at once.
+  const aligning = Boolean(active?.placement)
+  useEffect(() => {
+    if (aligning) surface.current?.focus()
+  }, [active?.page, aligning])
+
+  const placement = active?.placement
+  if (!active || !placement) return null
+
+  // Page pixels per CSS pixel along each axis, as fractions of the page.
+  const dpr = window.devicePixelRatio
+  const perPixel = {
+    x: dpr / camera.zoom / page.size.width,
+    y: dpr / camera.zoom / page.size.height,
+  }
+
+  const nudge = (event: ReactKeyboardEvent) => {
+    const step = event.shiftKey ? 10 : 1
+    const delta = {
+      ArrowLeft: [-step, 0],
+      ArrowRight: [step, 0],
+      ArrowUp: [0, -step],
+      ArrowDown: [0, step],
+    }[event.key]
+    if (!delta) return
+    event.preventDefault()
+    event.stopPropagation()
+    moveTracing({
+      ...placement,
+      x: placement.x + delta[0] / page.size.width,
+      y: placement.y + delta[1] / page.size.height,
+    })
+  }
+
+  return (
+    <div
+      ref={surface}
+      data-canvas-control
+      role='application'
+      aria-label={t('tracing.surface')}
+      tabIndex={0}
+      className='absolute inset-0 z-10 cursor-move touch-none outline-none'
+      onKeyDown={nudge}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return
+        event.currentTarget.focus()
+        event.currentTarget.setPointerCapture(event.pointerId)
+        drag.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, placement }
+      }}
+      onPointerMove={(event) => {
+        const start = drag.current
+        if (!start || start.pointer !== event.pointerId) return
+        moveTracing({
+          ...start.placement,
+          x: start.placement.x + (event.clientX - start.x) * perPixel.x,
+          y: start.placement.y + (event.clientY - start.y) * perPixel.y,
+        })
+      }}
+      onPointerUp={(event) => {
+        drag.current = null
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId)
+        }
+      }}
+      onPointerCancel={() => {
+        drag.current = null
+      }}
+      onWheel={(event) => {
+        if (!event.altKey) return
+        event.stopPropagation()
+        const bounds = event.currentTarget.getBoundingClientRect()
+        const x =
+          ((event.clientX - bounds.x) * dpr - camera.translation[0]) / camera.zoom / page.size.width
+        const y =
+          ((event.clientY - bounds.y) * dpr - camera.translation[1]) /
+          camera.zoom /
+          page.size.height
+        moveTracing(scaled(placement, Math.exp(-event.deltaY * 0.0005), x, y))
+      }}
+    >
+      {source && (
+        <PlacedImage
+          url={source}
+          rect={{ x: 0, y: 0, width: page.size.width, height: page.size.height }}
+          camera={camera}
+          label={t('compare.original')}
+        />
+      )}
+      {reference && (
+        <PlacedImage
+          url={reference}
+          rect={placedRect(placement, page.size)}
+          camera={camera}
+          label={t('compare.reference')}
+          opacity={active.opacity}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Controls for aligning the active page's reference. It follows the active
+ * page: switching pages saves a changed alignment and starts from the next
+ * page's saved one.
+ */
+export function TracingPanel({ page }: { page: Page }) {
+  const { t } = useTranslation()
+  const tracing = useKoharuStore((state) => state.tracing)
+  const moveTracing = useKoharuStore((state) => state.moveTracing)
+  const setOpacity = useKoharuStore((state) => state.setTracingOpacity)
+  const stopTracing = useKoharuStore((state) => state.stopTracing)
+  const pages = usePages().data
+  const index = pages?.findIndex((candidate) => candidate.id === page.id) ?? -1
+  const saved = index >= 0 ? (pages?.[index]?.reference?.placement ?? null) : null
+
+  useEffect(() => {
+    const current = useKoharuStore.getState().tracing
+    if (!current || current.page === page.id || pages === undefined) return
+    if (current.changed && current.placement) {
+      void savePlacement([current.page], current.placement).catch(() => undefined)
+    }
+    useKoharuStore.getState().startTracing(page.id, saved)
+  }, [page.id, pages, saved])
+
+  if (!tracing || tracing.page !== page.id) return null
+  const placement = tracing.placement
+  const rect = placement && placedRect(placement, page.size)
+
+  const finish = (targets: string[]) => {
+    if (!placement) return
+    void savePlacement(targets, placement)
+      .then(() => {
+        stopTracing()
+        if (targets.length > 1) {
+          toast.add({ type: 'success', title: t('tracing.applied', { count: targets.length }) })
+        }
+      })
+      .catch(() => undefined)
+  }
+  const following = () =>
+    (pages ?? [])
+      .slice(index)
+      .filter((candidate) => candidate.reference)
+      .map((candidate) => candidate.id)
+
+  const field = (key: 'x' | 'y' | 'width' | 'height') => {
+    if (!placement || !rect) return null
+    const extent = key === 'x' || key === 'width' ? page.size.width : page.size.height
+    return (
+      <label className='grid gap-0.5'>
+        <span className='text-[10px] text-muted-foreground'>{t(`tracing.${key}`)}</span>
+        <Input
+          type='number'
+          step={1}
+          value={Math.round(rect[key] * 10) / 10}
+          className='h-6 w-16 px-1.5 text-[11px] md:text-[11px]'
+          onChange={(event) => {
+            const value = event.currentTarget.valueAsNumber
+            if (!Number.isFinite(value)) return
+            if ((key === 'width' || key === 'height') && value <= 0) return
+            moveTracing({ ...placement, [key]: value / extent })
+          }}
+        />
+      </label>
+    )
+  }
+
+  return (
+    <section
+      data-canvas-control
+      aria-label={t('tracing.title')}
+      className='absolute top-2 left-1/2 z-20 grid w-[min(36rem,calc(100%-1rem))] -translate-x-1/2 gap-2 rounded-xl border border-border/70 bg-popover/95 p-2.5 text-[11px] shadow-lg backdrop-blur'
+    >
+      <header className='flex items-center gap-2'>
+        <h2 className='min-w-0 flex-1 truncate text-[12px] font-semibold'>
+          {t('tracing.title')} · {page.label}
+        </h2>
+        <Button
+          type='button'
+          size='icon-xs'
+          variant='ghost'
+          aria-label={t('tracing.close')}
+          onClick={stopTracing}
+        >
+          <X />
+        </Button>
+      </header>
+      {placement && rect ? (
+        <>
+          <div className='flex flex-wrap items-end gap-2'>
+            <label className='grid gap-0.5'>
+              <span className='text-[10px] text-muted-foreground'>{t('tracing.opacity')}</span>
+              <input
+                type='range'
+                min={10}
+                max={90}
+                value={Math.round(tracing.opacity * 100)}
+                className='h-6 w-24 accent-primary'
+                onChange={(event) => setOpacity(event.currentTarget.valueAsNumber / 100)}
+              />
+            </label>
+            <div className='grid gap-0.5'>
+              <span className='text-[10px] text-muted-foreground'>{t('tracing.size')}</span>
+              <div className='flex items-center'>
+                <Button
+                  type='button'
+                  size='icon-xs'
+                  variant='outline'
+                  aria-label={t('tracing.shrink')}
+                  onClick={() =>
+                    moveTracing(
+                      scaled(
+                        placement,
+                        1 / 1.01,
+                        placement.x + placement.width / 2,
+                        placement.y + placement.height / 2,
+                      ),
+                    )
+                  }
+                >
+                  <Minus />
+                </Button>
+                <Button
+                  type='button'
+                  size='icon-xs'
+                  variant='outline'
+                  aria-label={t('tracing.grow')}
+                  onClick={() =>
+                    moveTracing(
+                      scaled(
+                        placement,
+                        1.01,
+                        placement.x + placement.width / 2,
+                        placement.y + placement.height / 2,
+                      ),
+                    )
+                  }
+                >
+                  <Plus />
+                </Button>
+              </div>
+            </div>
+            {field('x')}
+            {field('y')}
+            {field('width')}
+            {field('height')}
+          </div>
+          <p className='text-[10px] text-muted-foreground'>{t('tracing.hint')}</p>
+          <div className='flex flex-wrap gap-1.5'>
+            <Button type='button' size='xs' variant='ghost' onClick={() => moveTracing(FILL)}>
+              {t('tracing.reset')}
+            </Button>
+            <Button type='button' size='xs' variant='ghost' onClick={() => finish(following())}>
+              {t('tracing.applyFollowing')}
+            </Button>
+            <span className='flex-1' />
+            <Button type='button' size='xs' variant='ghost' onClick={stopTracing}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type='button'
+              size='xs'
+              onClick={() => (tracing.changed ? finish([page.id]) : stopTracing())}
+            >
+              {t('tracing.save')}
+            </Button>
+          </div>
+        </>
+      ) : (
+        <p className='text-muted-foreground'>{t('tracing.noReference')}</p>
+      )}
+    </section>
+  )
+}

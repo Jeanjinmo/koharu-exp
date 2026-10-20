@@ -11,6 +11,7 @@ import type {
   Model,
   Frame,
   Preferences,
+  ReferencePlacement,
   ServerStatus,
   Stage,
   StartupState,
@@ -37,13 +38,26 @@ export type ShortcutAction = CanvasTool | 'fit' | 'compare'
 export type CompareMode = 'side_by_side' | 'slider' | 'peek'
 export const compareModes: readonly CompareMode[] = ['side_by_side', 'slider', 'peek']
 
+/** What Compare shows on a page that has a reference. */
+export type CompareSubject = 'reference' | 'original'
+
 export interface Compare {
   open: boolean
   mode: CompareMode
+  subject: CompareSubject
   /** Hold to peek shows the original while the shortcut is held. */
   peeking: boolean
   /** Where the slider divides the page, from 0 (left edge) to 1 (right edge). */
   split: number
+}
+/** Aligning a page's reference by hand, before the alignment is saved. */
+export interface Tracing {
+  page: EntityId
+  /** `null` while the page has no reference to align. */
+  placement: ReferencePlacement | null
+  /** Whether `placement` differs from the saved one. */
+  changed: boolean
+  opacity: number
 }
 export type Shortcuts = Record<ShortcutAction, string>
 export type PipelineScope = 'page' | 'selected-pages' | 'project'
@@ -78,6 +92,7 @@ interface KoharuStore {
   cleanup: ProjectCleanup | null
   referenceImport: boolean
   compare: Compare
+  tracing: Tracing | null
   shortcuts: Shortcuts
   selectPages: (pages: EntityId[]) => void
   showInspector: (section: InspectorSection) => void
@@ -90,6 +105,12 @@ interface KoharuStore {
   setCompareMode: (mode: CompareMode) => void
   setComparePeeking: (peeking: boolean) => void
   setCompareSplit: (split: number) => void
+  setCompareSubject: (subject: CompareSubject) => void
+  /** Starts aligning `page`'s reference from its saved placement. */
+  startTracing: (page: EntityId, placement: ReferencePlacement | null) => void
+  moveTracing: (placement: ReferencePlacement) => void
+  setTracingOpacity: (opacity: number) => void
+  stopTracing: () => void
   selectLayers: (layers: EntityId[]) => void
   setTool: (tool: CanvasTool) => void
   setBrush: (brush: CanvasBrush) => void
@@ -157,7 +178,14 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   settingsOpen: false,
   cleanup: null,
   referenceImport: false,
-  compare: { open: false, mode: rememberedCompareMode(), peeking: false, split: 0.5 },
+  compare: {
+    open: false,
+    mode: rememberedCompareMode(),
+    subject: 'reference',
+    peeking: false,
+    split: 0.5,
+  },
+  tracing: null,
   shortcuts: defaultShortcuts,
   selectPages: (selectedPages) => set({ selectedPages: [...new Set(selectedPages)] }),
   showInspector: (inspector) => set({ inspector }),
@@ -166,8 +194,13 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setCleanup: (cleanup) => set({ cleanup }),
   setReferenceImport: (referenceImport) => set({ referenceImport }),
+  // Compare and aligning a reference both draw over the canvas, so one
+  // closes the other.
   setCompareOpen: (open) =>
-    set((state) => ({ compare: { ...state.compare, open, peeking: false } })),
+    set((state) => ({
+      compare: { ...state.compare, open, peeking: false },
+      tracing: open ? null : state.tracing,
+    })),
   setCompareMode: (mode) => {
     rememberCompareMode(mode)
     set((state) => ({ compare: { ...state.compare, mode, peeking: false } }))
@@ -175,6 +208,21 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   setComparePeeking: (peeking) => set((state) => ({ compare: { ...state.compare, peeking } })),
   setCompareSplit: (split) =>
     set((state) => ({ compare: { ...state.compare, split: Math.min(1, Math.max(0, split)) } })),
+  setCompareSubject: (subject) => set((state) => ({ compare: { ...state.compare, subject } })),
+  startTracing: (page, placement) =>
+    set((state) => ({
+      compare: { ...state.compare, open: false, peeking: false },
+      tracing: { page, placement, changed: false, opacity: state.tracing?.opacity ?? 0.5 },
+    })),
+  moveTracing: (placement) =>
+    set((state) => ({
+      tracing: state.tracing && { ...state.tracing, placement, changed: true },
+    })),
+  setTracingOpacity: (opacity) =>
+    set((state) => ({
+      tracing: state.tracing && { ...state.tracing, opacity: Math.min(1, Math.max(0, opacity)) },
+    })),
+  stopTracing: () => set({ tracing: null }),
   selectLayers: (selectedLayers) => set({ selectedLayers: [...new Set(selectedLayers)] }),
   setTool: (tool) => set({ tool }),
   setBrush: (brush) => set({ brush }),
