@@ -757,6 +757,8 @@ describe('greenfield editor', () => {
     )
     const view = render(<Inspector />)
     expect(screen.getByText(/Nothing from the reference yet/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Read from reference…' }))
+    expect(useKoharuStore.getState().referencePick).toBe('element')
 
     act(() =>
       queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({

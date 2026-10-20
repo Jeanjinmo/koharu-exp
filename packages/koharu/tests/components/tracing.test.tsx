@@ -88,6 +88,7 @@ beforeEach(() => {
     canvasGeneration: 1,
     canvasSize: [1000, 1500],
     tracing: null,
+    referencePick: null,
   })
   useKoharuStore.getState().setCompareOpen(false)
   useKoharuStore.getState().setCompareSubject('reference')
@@ -187,5 +188,75 @@ describe('aligning a reference', () => {
       placement: { x: 0, y: 0, width: 1, height: 1 },
       changed: false,
     })
+  })
+})
+
+describe('reading text from a picked area of the reference', () => {
+  it('reads the box dragged over the reference into the element, in page pixels', async () => {
+    const read = vi.spyOn(commands, 'readReferenceArea').mockResolvedValue(null)
+    renderEditor()
+    act(() => {
+      queryClient.setQueryData(pageKey, {
+        id: 'one',
+        label: 'one',
+        size: { width: 1000, height: 1500 },
+        layers: [
+          {
+            type: 'raster',
+            id: 'element',
+            parent: null,
+            visibility: { visible: true, opacity: 1 },
+            image: null,
+            name: 'Text',
+            kind: 'cleanup',
+          },
+        ],
+        regions: [],
+      })
+      useKoharuStore.getState().setReferencePick('element')
+    })
+
+    const surface = await screen.findByRole('application', { name: 'Reference text picker' })
+    expect(await screen.findByRole('img', { name: 'Reference' })).toBeInTheDocument()
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 100, clientY: 100 })
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 200, clientY: 160 })
+    expect(screen.getByTestId('reference-pick-box')).toHaveStyle({ width: '100px', height: '60px' })
+    fireEvent.pointerUp(surface, { pointerId: 1, clientX: 200, clientY: 160 })
+
+    // The camera is zoomed twice and moved by (40, 60) device pixels.
+    expect(read).toHaveBeenCalledWith('element', { x: 30, y: 20, width: 50, height: 30 })
+    await waitFor(() => expect(useKoharuStore.getState().referencePick).toBeNull())
+  })
+
+  it('ignores stray clicks and closes with Escape', async () => {
+    const read = vi.spyOn(commands, 'readReferenceArea').mockResolvedValue(null)
+    renderEditor()
+    act(() => {
+      queryClient.setQueryData(pageKey, {
+        id: 'one',
+        label: 'one',
+        size: { width: 1000, height: 1500 },
+        layers: [
+          {
+            type: 'raster',
+            id: 'element',
+            parent: null,
+            visibility: { visible: true, opacity: 1 },
+            image: null,
+            name: 'Text',
+            kind: 'cleanup',
+          },
+        ],
+        regions: [],
+      })
+      useKoharuStore.getState().setReferencePick('element')
+    })
+
+    const surface = await screen.findByRole('application', { name: 'Reference text picker' })
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 100, clientY: 100 })
+    fireEvent.pointerUp(surface, { pointerId: 1, clientX: 102, clientY: 101 })
+    expect(read).not.toHaveBeenCalled()
+    fireEvent.keyDown(surface, { key: 'Escape' })
+    expect(useKoharuStore.getState().referencePick).toBeNull()
   })
 })

@@ -924,6 +924,7 @@ function ReferenceField({ layer }: { layer: Extract<Layer, { type: 'text' }> }) 
   const { t } = useTranslation()
   const active = usePage().data?.id
   const referenced = Boolean(usePages().data?.find((page) => page.id === active)?.reference)
+  const setPick = useKoharuStore((state) => state.setReferencePick)
   const reference = layer.content.reference
   if (!reference && !referenced) return null
   return (
@@ -943,6 +944,17 @@ function ReferenceField({ layer }: { layer: Extract<Layer, { type: 'text' }> }) 
         </p>
       ) : (
         <p className='text-[10px] text-muted-foreground'>{t('inspector.noReferenceText')}</p>
+      )}
+      {referenced && (
+        <Button
+          type='button'
+          variant='ghost'
+          size='xs'
+          className='h-5 justify-self-start px-1.5 text-[10px] font-normal text-muted-foreground hover:text-foreground'
+          onClick={() => setPick(layer.id)}
+        >
+          {t('references.pick')}
+        </Button>
       )}
     </InspectorField>
   )

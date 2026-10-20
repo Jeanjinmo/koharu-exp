@@ -263,13 +263,34 @@ pub(crate) async fn read_references(
     })?)
 }
 
+/// Reads the text in one area of a page's reference, in page pixels, into
+/// a text element of that page, for text the automatic pairing missed.
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "reference_area_read",
+    skip_all,
+    fields(origin = "user")
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn read_reference_area(
+    layer: EntityId,
+    area: koharu_pipeline::Bounds,
+    handle: AppHandle<CefRuntime>,
+    processing: State<'_, Processing>,
+) -> std::result::Result<(), Error> {
+    refuse_while_processing(&processing)?;
+    extract::read_area(&handle, layer, area).await?;
+    Ok(())
+}
+
 /// Pipeline stages read page assets, so changing them mid-run would make the
 /// run fail to commit.
 fn refuse_while_processing(processing: &Processing) -> Result<()> {
     if processing.stops.lock().is_empty() {
         Ok(())
     } else {
-        anyhow::bail!("references cannot change while processing is running")
+        anyhow::bail!("references cannot be changed or read while processing is running")
     }
 }
 

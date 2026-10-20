@@ -95,6 +95,8 @@ interface KoharuStore {
   referenceImport: boolean
   compare: Compare
   tracing: Tracing | null
+  /** The text element whose text is being picked from the page's reference. */
+  referencePick: EntityId | null
   shortcuts: Shortcuts
   selectPages: (pages: EntityId[]) => void
   showInspector: (section: InspectorSection) => void
@@ -113,6 +115,7 @@ interface KoharuStore {
   moveTracing: (placement: ReferencePlacement) => void
   setTracingOpacity: (opacity: number) => void
   stopTracing: () => void
+  setReferencePick: (layer: EntityId | null) => void
   selectLayers: (layers: EntityId[]) => void
   setTool: (tool: CanvasTool) => void
   setBrush: (brush: CanvasBrush) => void
@@ -188,6 +191,7 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
     split: 0.5,
   },
   tracing: null,
+  referencePick: null,
   shortcuts: defaultShortcuts,
   selectPages: (selectedPages) => set({ selectedPages: [...new Set(selectedPages)] }),
   showInspector: (inspector) => set({ inspector }),
@@ -202,6 +206,7 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
     set((state) => ({
       compare: { ...state.compare, open, peeking: false },
       tracing: open ? null : state.tracing,
+      referencePick: open ? null : state.referencePick,
     })),
   setCompareMode: (mode) => {
     rememberCompareMode(mode)
@@ -215,6 +220,7 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
     set((state) => ({
       compare: { ...state.compare, open: false, peeking: false },
       tracing: { page, placement, changed: false, opacity: state.tracing?.opacity ?? 0.5 },
+      referencePick: null,
     })),
   moveTracing: (placement) =>
     set((state) => ({
@@ -225,6 +231,12 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
       tracing: state.tracing && { ...state.tracing, opacity: Math.min(1, Math.max(0, opacity)) },
     })),
   stopTracing: () => set({ tracing: null }),
+  setReferencePick: (referencePick) =>
+    set((state) => ({
+      referencePick,
+      compare: referencePick ? { ...state.compare, open: false, peeking: false } : state.compare,
+      tracing: referencePick ? null : state.tracing,
+    })),
   selectLayers: (selectedLayers) => set({ selectedLayers: [...new Set(selectedLayers)] }),
   setTool: (tool) => set({ tool }),
   setBrush: (brush) => set({ brush }),

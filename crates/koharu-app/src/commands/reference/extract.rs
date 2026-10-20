@@ -8,7 +8,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use image::DynamicImage;
 use koharu_pipeline::{LayoutBox, Operation, Pipeline, RunStatus, Scope, Stage};
 use koharu_scene::{
@@ -24,7 +24,7 @@ use crate::commands::{
     ChannelExt as _,
     canvas::CanvasChannel,
     processing::{JobContext, JobSummary},
-    project::CurrentProject,
+    project::{CurrentProject, Project},
 };
 use koharu_desktop::Desktop;
 
@@ -210,27 +210,10 @@ async fn read_page(
     page: EntityId,
     target: Language,
 ) -> Result<(koharu_scene::Patch, ReferenceReading)> {
-    let reference = snapshot
-        .component::<PageReference>(page)?
-        .with_context(|| format!("page {page} has no reference"))?;
-    let asset = snapshot
-        .asset(page, &AssetRole::new(PageReference::ASSET_ROLE)?)?
-        .with_context(|| format!("page {page} has a reference without an image"))?;
-    let bytes = snapshot.read_blob(asset.blob).await?;
-    let image = Arc::new(
-        tokio_rayon::spawn(move || image::load_from_memory(&bytes))
-            .await
-            .context("failed to decode the reference image")?,
-    );
-    let size = snapshot.page(page)?.page()?;
+    let (reference, image, mapping) = load(snapshot, page).await?;
     let found = pipeline.detect_layout(image.clone()).await?;
     let page_areas = page_areas(snapshot, page)?;
-    let reference_areas = reference_areas(
-        &found,
-        reference.placement,
-        [size.width, size.height],
-        [f64::from(image.width()), f64::from(image.height())],
-    );
+    let reference_areas = reference_areas(&found, &mapping);
     let pairs = pair(&page_areas, &reference_areas);
     let crops = pairs
         .iter()
@@ -242,11 +225,7 @@ async fn read_page(
         .iter()
         .map(|paired| paired.and_then(|_| texts.next()))
         .collect::<Vec<_>>();
-    let same_language = reference
-        .language
-        .as_str()
-        .parse::<Language>()
-        .is_ok_and(|language| language == target);
+    let same_language = in_language(&reference.language, target);
     let (patch, mut reading) = write(
         snapshot,
         &page_areas,
@@ -261,6 +240,84 @@ async fn read_page(
     )
     .unwrap_or(u32::MAX);
     Ok((patch, reading))
+}
+
+/// The page's reference, its decoded image, and how the image lies over the page.
+async fn load(
+    snapshot: &Snapshot,
+    page: EntityId,
+) -> Result<(PageReference, Arc<DynamicImage>, Mapping)> {
+    let reference = snapshot
+        .component::<PageReference>(page)?
+        .with_context(|| format!("page {page} has no reference"))?;
+    let asset = snapshot
+        .asset(page, &AssetRole::new(PageReference::ASSET_ROLE)?)?
+        .with_context(|| format!("page {page} has a reference without an image"))?;
+    let bytes = snapshot.read_blob(asset.blob).await?;
+    let image = Arc::new(
+        tokio_rayon::spawn(move || image::load_from_memory(&bytes))
+            .await
+            .context("failed to decode the reference image")?,
+    );
+    let size = snapshot.page(page)?.page()?;
+    let mapping = Mapping::new(
+        reference.placement,
+        [size.width, size.height],
+        [f64::from(image.width()), f64::from(image.height())],
+    );
+    Ok((reference, image, mapping))
+}
+
+fn in_language(language: &LanguageTag, target: Language) -> bool {
+    language
+        .as_str()
+        .parse::<Language>()
+        .is_ok_and(|language| language == target)
+}
+
+/// Reads the text in one area of a page's reference, given in page pixels,
+/// into the text element `layer`: the way to pair text that the automatic
+/// pairing missed. It is one undo step.
+pub(crate) async fn read_area(
+    handle: &tauri::AppHandle<tauri_runtime_cef::CefRuntime>,
+    layer: EntityId,
+    area: koharu_pipeline::Bounds,
+) -> Result<()> {
+    let snapshot = current_snapshot(handle).await?;
+    let content = snapshot.text_layer(layer)?.content()?.id();
+    let page = Project::containing_page(&snapshot, layer)?;
+    let (reference, image, mapping) = load(&snapshot, page).await?;
+    let bounds = [area.x, area.y, area.x + area.width, area.y + area.height];
+    let pipeline = handle.state::<Pipeline>().inner().clone();
+    let text = pipeline
+        .read_text(vec![crop(&image, mapping.to_reference(bounds))])
+        .await?
+        .pop();
+    let target = koharu_pipeline::PipelineConfig::load()?
+        .read()?
+        .translation
+        .target_language;
+    let (patch, reading) = write(
+        &snapshot,
+        &[PageArea {
+            bounds,
+            contents: vec![content],
+        }],
+        vec![text],
+        &reference.language,
+        in_language(&reference.language, target),
+    )?;
+    if reading.read == 0 {
+        bail!("no text was found in that area of the reference");
+    }
+    if let Some(revision) = commit(handle, patch).await? {
+        let project = handle.state::<CurrentProject>();
+        let mut project = project.project.lock().await;
+        if let Some(project) = project.as_mut() {
+            project.record(vec![revision]);
+        }
+    }
+    Ok(())
 }
 
 /// Writes what was read for each page area into the area's first text
@@ -356,14 +413,45 @@ fn page_areas(snapshot: &Snapshot, page: EntityId) -> Result<Vec<PageArea>> {
     Ok(areas)
 }
 
+/// How the pixels of a reference image map onto its page.
+struct Mapping {
+    scale: [f64; 2],
+    offset: [f64; 2],
+}
+
+impl Mapping {
+    fn new(placement: ReferencePlacement, page: [f64; 2], image: [f64; 2]) -> Self {
+        Self {
+            scale: [
+                placement.width * page[0] / image[0],
+                placement.height * page[1] / image[1],
+            ],
+            offset: [placement.x * page[0], placement.y * page[1]],
+        }
+    }
+
+    fn to_page(&self, [left, top, right, bottom]: Bounds) -> Bounds {
+        [
+            self.offset[0] + left * self.scale[0],
+            self.offset[1] + top * self.scale[1],
+            self.offset[0] + right * self.scale[0],
+            self.offset[1] + bottom * self.scale[1],
+        ]
+    }
+
+    fn to_reference(&self, [left, top, right, bottom]: Bounds) -> Bounds {
+        [
+            (left - self.offset[0]) / self.scale[0],
+            (top - self.offset[1]) / self.scale[1],
+            (right - self.offset[0]) / self.scale[0],
+            (bottom - self.offset[1]) / self.scale[1],
+        ]
+    }
+}
+
 /// The reference's text areas, placed over the page: each bubble with the
 /// text found inside it, and each text outside any bubble.
-fn reference_areas(
-    found: &[LayoutBox],
-    placement: ReferencePlacement,
-    page: [f64; 2],
-    image: [f64; 2],
-) -> Vec<ReferenceArea> {
+fn reference_areas(found: &[LayoutBox], mapping: &Mapping) -> Vec<ReferenceArea> {
     let bounds = |found: &LayoutBox| found.bounds.map(f64::from);
     let bubbles = found
         .iter()
@@ -387,29 +475,16 @@ fn reference_areas(
             None => free.push(text),
         }
     }
-    let scale = [
-        placement.width * page[0] / image[0],
-        placement.height * page[1] / image[1],
-    ];
-    let offset = [placement.x * page[0], placement.y * page[1]];
-    let place = |[left, top, right, bottom]: Bounds| {
-        [
-            offset[0] + left * scale[0],
-            offset[1] + top * scale[1],
-            offset[0] + right * scale[0],
-            offset[1] + bottom * scale[1],
-        ]
-    };
     bubbles
         .iter()
         .zip(inside)
         .map(|(bubble, texts)| ReferenceArea {
-            bounds: place(*bubble),
+            bounds: mapping.to_page(*bubble),
             // A bubble without detected text is read whole.
             read: texts.into_iter().reduce(union).unwrap_or(*bubble),
         })
         .chain(free.into_iter().map(|text| ReferenceArea {
-            bounds: place(text),
+            bounds: mapping.to_page(text),
             read: text,
         }))
         .collect()
@@ -750,13 +825,7 @@ mod tests {
     #[test]
     fn reference_areas_are_placed_over_the_page_with_their_text() {
         // A half-size reference shifted right by a tenth of the page.
-        let areas = reference_areas(
-            &[
-                found("bubble", [10.0, 10.0, 110.0, 60.0]),
-                found("text", [30.0, 20.0, 90.0, 50.0]),
-                found("text", [300.0, 400.0, 340.0, 420.0]),
-                found("panel", [0.0, 0.0, 500.0, 750.0]),
-            ],
+        let mapping = Mapping::new(
             ReferencePlacement {
                 x: 0.1,
                 y: 0.0,
@@ -765,6 +834,15 @@ mod tests {
             },
             [1000.0, 1500.0],
             [500.0, 750.0],
+        );
+        let areas = reference_areas(
+            &[
+                found("bubble", [10.0, 10.0, 110.0, 60.0]),
+                found("text", [30.0, 20.0, 90.0, 50.0]),
+                found("text", [300.0, 400.0, 340.0, 420.0]),
+                found("panel", [0.0, 0.0, 500.0, 750.0]),
+            ],
+            &mapping,
         );
         assert_eq!(
             areas,
@@ -778,6 +856,11 @@ mod tests {
                     read: [300.0, 400.0, 340.0, 420.0],
                 },
             ]
+        );
+        // An area picked on the page maps back to the same reference pixels.
+        assert_eq!(
+            mapping.to_reference([120.0, 20.0, 320.0, 120.0]),
+            [10.0, 10.0, 110.0, 60.0]
         );
     }
 

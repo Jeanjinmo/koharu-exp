@@ -112,6 +112,7 @@ pub fn bindings() -> tauri_specta::Builder<tauri_runtime_cef::CefRuntime> {
             reference::detach_references,
             reference::set_reference_placement,
             reference::read_references,
+            reference::read_reference_area,
             fonts::get_fonts,
             fonts::get_font_preview,
             preferences::save_preferences,

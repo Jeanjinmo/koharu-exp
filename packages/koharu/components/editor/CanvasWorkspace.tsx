@@ -7,6 +7,7 @@ import { useColorSampling } from '@/components/controls/ColorSampling'
 import { CanvasCommandBar } from '@/components/editor/CanvasCommandBar'
 import { CanvasOverlay } from '@/components/editor/CanvasOverlay'
 import { CompareOverlay, ComparePane } from '@/components/editor/Compare'
+import { ReferencePickOverlay } from '@/components/editor/ReferencePick'
 import { StatusBar } from '@/components/editor/StatusBar'
 import { ToolBar } from '@/components/editor/ToolBar'
 import { TracingOverlay, TracingPanel } from '@/components/editor/Tracing'
@@ -781,6 +782,7 @@ export function CanvasWorkspace() {
             />
           )}
           {page && canvasState.status === 'ready' && <TracingOverlay page={page} />}
+          {page && canvasState.status === 'ready' && <ReferencePickOverlay page={page} />}
           {page && <TracingPanel page={page} />}
           {page && canvasState.status === 'error' && (
             <div
