@@ -1185,6 +1185,50 @@ async fn assets_attach_bytes_without_decoding() {
 }
 
 #[tokio::test]
+async fn garbage_collection_frees_deleted_pages_and_clears_undo() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cleanup.khrproj");
+    let role = AssetRole::new("source").unwrap();
+    let mut session = Session::create(&path).await.unwrap();
+    let mut added = None;
+    let patch = session
+        .snapshot()
+        .patch(|edit| {
+            let page = edit.add_page(page(), At::End)?;
+            added = Some(page);
+            edit.set_asset(
+                page,
+                &role,
+                AssetInput::new(
+                    Arc::<[u8]>::from(&b"page image"[..]),
+                    "image/test",
+                    AssetMetadata {
+                        width: None,
+                        height: None,
+                        attributes: BTreeMap::new(),
+                    },
+                ),
+            )
+        })
+        .unwrap();
+    session.commit(patch).await.unwrap();
+    let removal = session
+        .snapshot()
+        .patch(|edit| edit.remove_entity(added.unwrap(), RemovePolicy::Cascade))
+        .unwrap();
+    let removed = session.commit(removal).await.unwrap().revision;
+
+    assert_eq!(session.reclaimable().await.unwrap().blobs, 1);
+    let report = session.collect_garbage().await.unwrap();
+    assert_eq!((report.blobs, report.bytes), (1, 10));
+    assert!(session.undo(removed).await.is_err());
+    drop(session);
+
+    let reopened = Session::open(&path).await.unwrap();
+    assert_eq!(reopened.snapshot().pages().len(), 0);
+}
+
+#[tokio::test]
 async fn repeated_asset_writes_rebase_over_an_unrelated_page_edit() {
     let mut session = Session::memory().await.unwrap();
     let mut ids = None;

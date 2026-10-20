@@ -84,6 +84,8 @@ pub fn bindings() -> tauri_specta::Builder<tauri_runtime_cef::CefRuntime> {
             lifecycle::close_project,
             lifecycle::import,
             lifecycle::select_page,
+            lifecycle::get_reclaimable_space,
+            lifecycle::free_disk_space,
             editing::rename_page,
             editing::set_page_status,
             editing::delete_pages,

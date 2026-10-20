@@ -2,7 +2,7 @@ use std::fs;
 
 use bytes::Bytes;
 
-use crate::{BlobId, DocumentId, Error, Revision, Session};
+use crate::{BlobId, DocumentId, Error, GcReport, Revision, Session};
 
 fn blob_path(root: &std::path::Path, id: BlobId) -> std::path::PathBuf {
     let name = id.to_string();
@@ -112,7 +112,7 @@ async fn project_lock_lives_as_long_as_blob_scopes() {
 }
 
 #[tokio::test]
-async fn garbage_collection_keeps_both_slots_and_active_states() {
+async fn garbage_collection_frees_what_only_earlier_states_use() {
     let root = tempfile::tempdir().unwrap();
     let session = Session::create(root.path(), DocumentId::new(), Bytes::new())
         .await
@@ -135,17 +135,26 @@ async fn garbage_collection_keeps_both_slots_and_active_states() {
         .unwrap();
     let second = session.save(&second_proposed).await.unwrap();
     drop(second_proposed);
-    assert_eq!(session.collect_garbage().await.unwrap().blobs, 0);
 
-    let third_proposed = second
-        .update(Revision::new(3), Bytes::from_static(b"three"), [], [])
-        .unwrap();
-    let third = session.save(&third_proposed).await.unwrap();
-    drop(third_proposed);
-    drop((initial, first, second, third));
+    let reclaimable = session.reclaimable().await.unwrap();
+    assert_eq!((reclaimable.blobs, reclaimable.bytes), (1, 8));
+    // A live state still reads the blob, so it survives.
+    assert_eq!(session.collect_garbage().await.unwrap().blobs, 0);
+    assert!(blob_path(root.path(), id).exists());
+
+    drop((initial, first));
     let report = session.collect_garbage().await.unwrap();
-    assert_eq!(report.blobs, 1);
+    assert_eq!((report.blobs, report.bytes), (1, 8));
     assert!(!blob_path(root.path(), id).exists());
+    assert_eq!(session.reclaimable().await.unwrap(), GcReport::default());
+    drop((second, session));
+
+    let reopened = Session::open(root.path()).await.unwrap();
+    assert_eq!(reopened.revision(), Revision::new(2));
+    assert_eq!(
+        reopened.load().await.unwrap().payload(),
+        &Bytes::from_static(b"two")
+    );
 }
 
 #[tokio::test]

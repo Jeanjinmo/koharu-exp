@@ -59,6 +59,13 @@ export const commands = {
 	closeProject: () => __TAURI_INVOKE<null>("close_project"),
 	import: (source: PageImportSource) => __TAURI_INVOKE<null>("import", { source }),
 	selectPage: (page: EntityId) => __TAURI_INVOKE<PageSelection>("select_page", { page }).then((v) => (({...v,page:({...v.page,layers:v.page.layers.map(i=>i),regions:v.page.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))})}) as typeof v)),
+	/**  The most disk space that freeing would recover now. */
+	getReclaimableSpace: () => __TAURI_INVOKE<DiskSpace>("get_reclaimable_space"),
+	/**
+	 *  Deletes stored content that only earlier revisions use and clears undo
+	 *  and redo. This cannot be undone.
+	 */
+	freeDiskSpace: () => __TAURI_INVOKE<DiskSpace>("free_disk_space"),
 	renamePage: (page: EntityId, label: string) => __TAURI_INVOKE<null>("rename_page", { page, label }),
 	setPageStatus: (pages: EntityId[], status: PageStatus) => __TAURI_INVOKE<null>("set_page_status", { pages, status }),
 	deletePages: (pages: EntityId[]) => __TAURI_INVOKE<null>("delete_pages", { pages }),
@@ -181,6 +188,12 @@ export type DeviceResources = {
 	memory_budget: number | null,
 	memory_used: number | null,
 	utilization: number | null,
+};
+
+/**  Stored project content on disk, as measured or freed. */
+export type DiskSpace = {
+	files: number,
+	bytes: number,
 };
 
 export type Download = {

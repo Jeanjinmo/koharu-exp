@@ -3,6 +3,7 @@
 import { Cpu, Gauge, HardDrive, MemoryStick } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { formatBytes } from '@/lib/format'
 import { useKoharuStore } from '@/lib/store'
 import {
   Popover,
@@ -23,8 +24,8 @@ export function ResourceMonitor() {
     resources.devices.find((candidate) => candidate.selected) ?? resources.devices[0] ?? null
   const cpu = percent(resources.process_cpu)
   const ram = percentOf(resources.process_memory, resources.system_memory)
-  const ramUsed = bytes(resources.process_memory)
-  const ramTotal = bytes(resources.system_memory)
+  const ramUsed = formatBytes(resources.process_memory)
+  const ramTotal = formatBytes(resources.system_memory)
   const gpu = device?.utilization == null ? null : percent(device.utilization)
   const vram =
     device?.memory_used != null && device.memory_budget != null
@@ -142,10 +143,4 @@ function percent(value: number): string {
 function percentOf(used: number, total: number): string {
   if (total <= 0) return '—'
   return percent(Math.min((used / total) * 100, 100))
-}
-
-function bytes(value: number): string {
-  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB`
-  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`
-  return `${Math.round(value / 1024)} KB`
 }

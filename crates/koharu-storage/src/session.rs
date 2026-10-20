@@ -223,23 +223,38 @@ impl Session {
         })
     }
 
+    /// Permanently deletes blobs that neither the current state nor a live
+    /// state references. The previous saved state is retired first by saving
+    /// the current state over it, so only the current state can be recovered
+    /// from disk afterwards and blobs that only the previous state used are
+    /// freed too.
     #[tracing::instrument(level = "info", skip_all)]
     pub async fn collect_garbage(&self) -> Result<GcReport> {
         let _writer = self.inner.writer.lock().await;
+        let head = self.inner.head.read().clone();
         let root = self.inner.root.clone();
         let store = self.inner.blobs.clone();
         tokio::task::spawn_blocking(move || {
-            let mut saved = BTreeSet::new();
-            for slot in [Slot::A, Slot::B] {
-                if let Ok(Some(state)) = format::load(&root, slot) {
-                    saved.extend(state.blobs);
-                }
-            }
-            let (blobs, bytes) = store.collect(saved)?;
+            format::save(&root, head.slot.other(), &head.stored)?;
+            let (blobs, bytes) = store.collect(head.stored.blobs.iter().copied().collect())?;
             Ok::<_, Error>(GcReport { blobs, bytes })
         })
         .await
         .context("storage garbage collection task failed")?
+    }
+
+    /// The blobs on disk that the current state does not reference: the most
+    /// that [`Self::collect_garbage`] can free, since live states may still
+    /// hold some of them.
+    pub async fn reclaimable(&self) -> Result<GcReport> {
+        let head = self.inner.head.read().clone();
+        let store = self.inner.blobs.clone();
+        tokio::task::spawn_blocking(move || {
+            let (blobs, bytes) = store.measure(&head.stored.blobs.iter().copied().collect())?;
+            Ok::<_, Error>(GcReport { blobs, bytes })
+        })
+        .await
+        .context("storage measurement task failed")?
     }
 }
 

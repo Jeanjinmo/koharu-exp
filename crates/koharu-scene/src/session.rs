@@ -179,8 +179,17 @@ impl Session {
         self.commit(patch).await
     }
 
-    pub async fn collect_garbage(&self) -> Result<koharu_storage::GcReport> {
+    /// Permanently deletes stored content that only earlier revisions use,
+    /// through undo history or the previous saved state. The undo history is
+    /// cleared first, so nothing before this point can be undone.
+    pub async fn collect_garbage(&mut self) -> Result<crate::GcReport> {
+        self.history.clear();
         self.storage.collect_garbage().await.map_err(Into::into)
+    }
+
+    /// The most stored content that [`Self::collect_garbage`] can free.
+    pub async fn reclaimable(&self) -> Result<crate::GcReport> {
+        self.storage.reclaimable().await.map_err(Into::into)
     }
 
     async fn assemble(storage: koharu_storage::Session, state: State) -> Result<Self> {

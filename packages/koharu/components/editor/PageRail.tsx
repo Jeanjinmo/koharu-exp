@@ -5,6 +5,7 @@ import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual'
 import {
   FilePlus2,
   FolderOpen,
+  HardDrive,
   LoaderCircle,
   MoreHorizontal,
   Search,
@@ -85,6 +86,7 @@ export function PageRail() {
   const selectPages = useKoharuStore((state) => state.selectPages)
   const selectLayers = useKoharuStore((state) => state.selectLayers)
   const setSettingsOpen = useKoharuStore((state) => state.setSettingsOpen)
+  const setCleanup = useKoharuStore((state) => state.setCleanup)
   const { importPages, importing } = useImportPages()
   const anchor = useRef<number | null>(null)
   const selectionRequest = useRef(0)
@@ -277,6 +279,25 @@ export function PageRail() {
               {t('navigator.selected', { count: selected.length })}
             </span>
           )}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant='ghost'
+                  size='icon-xs'
+                  aria-label={t('cleanup.projectActions')}
+                  className={cn('shrink-0 shadow-none', selected.length > 1 ? 'ml-1' : 'ml-auto')}
+                />
+              }
+            >
+              <MoreHorizontal />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='end'>
+              <DropdownMenuItem onClick={() => setCleanup('free-space')}>
+                <HardDrive /> {t('cleanup.freeSpace')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </header>
 
         {pages.length > 0 && (

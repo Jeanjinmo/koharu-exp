@@ -992,6 +992,20 @@ impl Project {
         Ok(commit)
     }
 
+    /// Permanently deletes stored content that only earlier revisions use,
+    /// such as the images of deleted pages. Undo and redo are cleared, because
+    /// what they would restore may be gone.
+    pub(crate) async fn collect_garbage(&mut self) -> Result<koharu_scene::GcReport> {
+        let report = self.session.collect_garbage().await?;
+        self.undo.clear();
+        self.redo.clear();
+        Ok(report)
+    }
+
+    pub(crate) async fn reclaimable(&self) -> Result<koharu_scene::GcReport> {
+        Ok(self.session.reclaimable().await?)
+    }
+
     pub(crate) fn record(&mut self, revisions: Vec<Revision>) {
         if !revisions.is_empty() {
             self.undo.push(revisions);
@@ -1598,6 +1612,26 @@ mod tests {
                 .set_page_status(vec![EntityId::new()], PageStatus::Done)
                 .await
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn freeing_disk_space_clears_undo_and_redo() {
+        let (mut project, page, _) = project_with_text(0).await;
+        let commit = project
+            .set_page_status(vec![page], PageStatus::Done)
+            .await
+            .unwrap();
+        project.record_commit(&commit);
+        assert!(project.info().can_undo);
+
+        project.collect_garbage().await.unwrap();
+
+        assert!(!project.info().can_undo);
+        assert!(!project.info().can_redo);
+        assert_eq!(
+            Project::pages(&project.snapshot()).unwrap()[0].status,
+            PageStatus::Done
         );
     }
 

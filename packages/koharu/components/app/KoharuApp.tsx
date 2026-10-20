@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 
 import { TitleBar } from '@/components/app/TitleBar'
 import { Editor } from '@/components/editor/Editor'
+import { ProjectCleanupDialogs } from '@/components/editor/ProjectCleanup'
 import { SettingsPage } from '@/components/preferences/SettingsPage'
 import { StartView } from '@/components/start/StartView'
 import { useProject } from '@/lib/queries'
@@ -50,6 +51,7 @@ export function KoharuApp() {
       ) : (
         <Editor />
       )}
+      {project && <ProjectCleanupDialogs />}
     </div>
   )
 }

@@ -88,6 +88,7 @@ impl BlobStore {
         self.scope(ids, BTreeMap::new())
     }
 
+    /// Deletes every blob that `saved` and the live leases leave unreferenced.
     pub(crate) fn collect(&self, saved: BTreeSet<BlobId>) -> Result<(usize, u64)> {
         let mut marked = saved;
         let mut leases = self.leases.lock();
@@ -99,8 +100,16 @@ impl BlobStore {
             true
         });
         drop(leases);
+        self.sweep(&marked, true)
+    }
 
-        let mut removed = 0;
+    /// Counts the blobs that `kept` does not reference, without deleting any.
+    pub(crate) fn measure(&self, kept: &BTreeSet<BlobId>) -> Result<(usize, u64)> {
+        self.sweep(kept, false)
+    }
+
+    fn sweep(&self, kept: &BTreeSet<BlobId>, delete: bool) -> Result<(usize, u64)> {
+        let mut count = 0;
         let mut bytes = 0u64;
         let root = self.root.join("blobs");
         if !root.try_exists()? {
@@ -122,16 +131,18 @@ impl BlobStore {
                 let Ok(id) = name.parse::<BlobId>() else {
                     continue;
                 };
-                if marked.contains(&id) {
+                if kept.contains(&id) {
                     continue;
                 }
                 let size = entry.metadata()?.len();
-                fs::remove_file(entry.path())?;
-                removed += 1;
+                if delete {
+                    fs::remove_file(entry.path())?;
+                }
+                count += 1;
                 bytes = bytes.saturating_add(size);
             }
         }
-        Ok((removed, bytes))
+        Ok((count, bytes))
     }
 
     fn path(&self, id: BlobId) -> PathBuf {

@@ -465,6 +465,63 @@ pub(crate) async fn import(
     Ok(())
 }
 
+/// Stored project content on disk, as measured or freed.
+#[derive(Clone, Copy, Debug, Serialize, Type)]
+pub struct DiskSpace {
+    #[specta(type = f64)]
+    pub files: usize,
+    #[specta(type = f64)]
+    pub bytes: u64,
+}
+
+impl From<koharu_scene::GcReport> for DiskSpace {
+    fn from(report: koharu_scene::GcReport) -> Self {
+        Self {
+            files: report.blobs,
+            bytes: report.bytes,
+        }
+    }
+}
+
+/// The most disk space that freeing would recover now.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn get_reclaimable_space(
+    project: State<'_, CurrentProject>,
+) -> std::result::Result<DiskSpace, Error> {
+    let project = project.project.lock().await;
+    let project = project.as_ref().context("no project is open")?;
+    Ok(project.reclaimable().await?.into())
+}
+
+/// Deletes stored content that only earlier revisions use and clears undo
+/// and redo. This cannot be undone.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn free_disk_space(
+    handle: AppHandle<CefRuntime>,
+) -> std::result::Result<DiskSpace, Error> {
+    if !handle.state::<Processing>().stops.lock().is_empty() {
+        return Err(
+            anyhow::anyhow!("disk space cannot be freed while processing is running").into(),
+        );
+    }
+    let (freed, info) = {
+        let current = handle.state::<CurrentProject>();
+        let mut current = current.project.lock().await;
+        let project = current.as_mut().context("no project is open")?;
+        let freed = project.collect_garbage().await?;
+        (freed, project.info())
+    };
+    tracing::info!(
+        files = freed.blobs,
+        bytes = freed.bytes,
+        "freed project disk space"
+    );
+    handle.state::<ProjectChannel>().channel.publish(Some(info));
+    Ok(freed.into())
+}
+
 /// Shows `page` in the editor for an agent that changed it. Only the editor
 /// follows: the window is never shown, restored, or focused, so the owner can
 /// keep working in another application. Returns whether the page changed.
