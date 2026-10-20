@@ -27,6 +27,8 @@ use crate::commands::{
     project::{CurrentProject, Project, ProjectInfo, TranslationUpdate, Typography},
 };
 
+mod outline;
+
 #[derive(Clone)]
 pub(super) struct KoharuHost {
     handle: AppHandle<CefRuntime>,
@@ -81,6 +83,18 @@ impl KoharuHost {
                 "available_fonts": fonts.into_iter().map(|font| font.name).collect::<Vec<_>>(),
             },
         }))
+    }
+
+    async fn snapshot(&self) -> Result<Snapshot> {
+        Ok(self
+            .handle
+            .state::<CurrentProject>()
+            .project
+            .lock()
+            .await
+            .as_ref()
+            .context("no project is open")?
+            .snapshot())
     }
 
     async fn mutate<T>(
@@ -243,6 +257,11 @@ impl Host for KoharuHost {
                         "Read the latest complete semantic project state after edits. This does not include page images.",
                         metadata(ToolGroup::Read),
                     ),
+                    definition::<InspectPage>(
+                        "inspect_page",
+                        "Read one page compactly: its size, every text element (ID, box, source text and translation with languages, core typography) and its paint and cleanup layer IDs. Prefer this over inspect_project when working page by page.",
+                        metadata(ToolGroup::Read),
+                    ),
                     definition::<ViewPage>(
                         "view_page",
                         "Render and inspect one page image. Call this only for pages whose visual appearance matters to the request.",
@@ -347,6 +366,11 @@ impl Host for KoharuHost {
             "inspect_project" => {
                 let _: InspectProject = arguments(&call)?;
                 Invocation::read(self.project_context().await?)
+            }
+            "inspect_page" => {
+                let arguments: InspectPage = arguments(&call)?;
+                let page = entity(&arguments.page)?;
+                Invocation::read(outline::page_outline(&self.snapshot().await?, page)?)
             }
             "view_page" => {
                 let arguments: ViewPage = arguments(&call)?;
@@ -757,6 +781,11 @@ fn entities(values: &[String]) -> Result<Vec<EntityId>> {
 
 #[derive(Deserialize, JsonSchema)]
 struct InspectProject {}
+
+#[derive(Deserialize, JsonSchema)]
+struct InspectPage {
+    page: String,
+}
 
 #[derive(Deserialize, JsonSchema)]
 struct ViewPage {

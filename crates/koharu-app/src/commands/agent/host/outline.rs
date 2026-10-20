@@ -1,0 +1,278 @@
+//! Compact, agent-facing projections of one page. They keep what a translator
+//! needs (text, boxes, core typography) and leave out artwork details and
+//! fonts, which `inspect_project` already covers.
+
+use std::collections::HashMap;
+
+use anyhow::Result;
+use koharu_scene::{EntityId, RasterLayerKind, Snapshot, TextAlignment, WritingMode};
+use serde::Serialize;
+
+use crate::commands::{
+    canvas::Point,
+    project::{Geometry, Layer, Project, Typography},
+};
+
+#[derive(Debug, Serialize)]
+pub(super) struct PageOutline {
+    id: EntityId,
+    label: String,
+    width: f64,
+    height: f64,
+    elements: Vec<ElementOutline>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    raster_layers: Vec<RasterOutline>,
+}
+
+#[derive(Debug, Serialize)]
+struct ElementOutline {
+    id: EntityId,
+    /// Where the element's text is laid out, as `[x, y, width, height]`.
+    #[serde(rename = "box", skip_serializing_if = "Option::is_none")]
+    frame: Option<[i64; 4]>,
+    /// Where the original text was detected, when it differs from `box`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_box: Option<[i64; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<TextOutline>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    translation: Option<TextOutline>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    typography: Option<TypographyOutline>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    hidden: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct TextOutline {
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TypographyOutline {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    font: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size: Option<f32>,
+    #[serde(skip_serializing_if = "is_true")]
+    auto_fit: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    color: Option<[u8; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stroke_color: Option<[u8; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stroke_width: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alignment: Option<TextAlignment>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    writing_mode: Option<WritingMode>,
+}
+
+#[derive(Debug, Serialize)]
+struct RasterOutline {
+    id: EntityId,
+    kind: RasterLayerKind,
+    name: String,
+}
+
+pub(super) fn page_outline(snapshot: &Snapshot, page: EntityId) -> Result<PageOutline> {
+    let view = Project::page(snapshot, page)?;
+    let regions = view
+        .regions
+        .iter()
+        .map(|region| (region.id, &region.geometry))
+        .collect::<HashMap<_, _>>();
+    let mut elements = Vec::new();
+    let mut raster_layers = Vec::new();
+    for layer in view.layers {
+        match layer {
+            Layer::Text {
+                id,
+                geometry,
+                visibility,
+                content,
+                typography,
+                automatic_region,
+                ..
+            } => {
+                let frame = geometry
+                    .as_ref()
+                    .or_else(|| automatic_region.and_then(|region| regions.get(&region).copied()))
+                    .and_then(extent);
+                let source_box = content
+                    .source_region
+                    .and_then(|region| regions.get(&region).copied())
+                    .and_then(extent)
+                    .filter(|source| frame.as_ref() != Some(source));
+                elements.push(ElementOutline {
+                    id,
+                    frame: frame.map(rounded),
+                    source_box: source_box.map(rounded),
+                    source: content.source.map(|source| TextOutline {
+                        text: source.text,
+                        language: source.language,
+                    }),
+                    translation: content.translation.map(|translation| TextOutline {
+                        text: translation.text,
+                        language: translation.language,
+                    }),
+                    typography: typography.and_then(typography_outline),
+                    hidden: !visibility.visible,
+                });
+            }
+            Layer::Raster { id, kind, name, .. } => {
+                raster_layers.push(RasterOutline { id, kind, name });
+            }
+            Layer::Group { .. } | Layer::Image { .. } | Layer::Artwork { .. } => {}
+        }
+    }
+    Ok(PageOutline {
+        id: view.id,
+        label: view.label,
+        width: view.size.width,
+        height: view.size.height,
+        elements,
+        raster_layers,
+    })
+}
+
+fn typography_outline(typography: Typography) -> Option<TypographyOutline> {
+    let outline = TypographyOutline {
+        font: typography.preferred_font,
+        size: typography.size,
+        auto_fit: typography.auto_fit,
+        color: typography.color,
+        stroke_color: typography.stroke_color,
+        stroke_width: typography.stroke_width,
+        alignment: typography.alignment,
+        writing_mode: typography.writing_mode,
+    };
+    let default = outline.font.is_none()
+        && outline.size.is_none()
+        && outline.auto_fit
+        && outline.color.is_none()
+        && outline.stroke_color.is_none()
+        && outline.stroke_width.is_none()
+        && outline.alignment.is_none()
+        && outline.writing_mode.is_none();
+    (!default).then_some(outline)
+}
+
+/// Axis-aligned `[x, y, width, height]` of a polygon in page pixels.
+fn extent(geometry: &Geometry) -> Option<[f64; 4]> {
+    let (first, rest) = geometry.points.split_first()?;
+    let (min, max) = rest.iter().fold((*first, *first), |(min, max), point| {
+        (
+            Point {
+                x: min.x.min(point.x),
+                y: min.y.min(point.y),
+            },
+            Point {
+                x: max.x.max(point.x),
+                y: max.y.max(point.y),
+            },
+        )
+    });
+    Some([min.x, min.y, max.x - min.x, max.y - min.y])
+}
+
+fn rounded([x, y, width, height]: [f64; 4]) -> [i64; 4] {
+    [x, y, width, height].map(|value| value.round() as i64)
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+#[cfg(test)]
+mod tests {
+    use koharu_scene::{
+        At, Authored, Geometry as SceneGeometry, LanguageTag, Origin, PageDraft, RasterLayer,
+        RecognizedFrom, Session, SourceText, TextLayout, TextLayoutKind, TextRegion, Translation,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn a_page_of_ten_balloons_stays_compact() {
+        let mut session = Session::memory().await.unwrap();
+        let mut ids = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                let page = edit.add_page(PageDraft::new("001.png", 1200.0, 1800.0), At::End)?;
+                let mut elements = Vec::new();
+                for index in 0..10 {
+                    let top = 40.0 + f64::from(index) * 170.0;
+                    let region = edit.add_analysis_region::<TextRegion>(
+                        page,
+                        At::End,
+                        &SceneGeometry::rectangle(110.0, top + 10.0, 180.0, 120.0),
+                        None,
+                    )?;
+                    let content = edit.add_text_content(page, At::End)?;
+                    edit.set(
+                        content,
+                        &SourceText {
+                            text: Authored::user("そんなことより神様はどこにいるんだ".to_owned()),
+                            language: Some(LanguageTag::new("ja")?),
+                        },
+                    )?;
+                    edit.set(
+                        content,
+                        &Translation {
+                            text: Authored::user(
+                                "Lebih penting dari itu, di mana sebenarnya Sang Tuhan berada?"
+                                    .to_owned(),
+                            ),
+                            language: Some(LanguageTag::new("id-ID")?),
+                        },
+                    )?;
+                    edit.relate::<RecognizedFrom>(content, region)?;
+                    let layer = edit.add_text_layer(
+                        page,
+                        At::End,
+                        content,
+                        &TextLayout {
+                            origin: Origin::User,
+                            kind: TextLayoutKind::Paragraph,
+                            angle_degrees: None,
+                        },
+                    )?;
+                    edit.set(layer, &SceneGeometry::rectangle(100.0, top, 200.0, 140.0))?;
+                    elements.push(layer);
+                }
+                let cleanup = edit.add_entity(page, At::Start)?;
+                edit.set(
+                    cleanup,
+                    &RasterLayer {
+                        origin: Origin::User,
+                        name: "Cleanup".to_owned(),
+                        kind: RasterLayerKind::Cleanup,
+                    },
+                )?;
+                ids = Some((page, elements, cleanup));
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let (page, elements, cleanup) = ids.unwrap();
+
+        let outline = page_outline(&snapshot, page).unwrap();
+        let json = serde_json::to_string(&outline).unwrap();
+
+        assert!(json.len() < 5_000, "{} characters: {json}", json.len());
+        assert_eq!(outline.elements.len(), 10);
+        let first = &outline.elements[0];
+        assert_eq!(first.id, elements[0]);
+        assert_eq!(first.frame, Some([100, 40, 200, 140]));
+        assert_eq!(first.source_box, Some([110, 50, 180, 120]));
+        assert_eq!(
+            first.translation.as_ref().unwrap().language.as_deref(),
+            Some("id-ID")
+        );
+        assert_eq!(outline.raster_layers[0].id, cleanup);
+    }
+}
