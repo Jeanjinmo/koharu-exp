@@ -16,7 +16,7 @@ use koharu_pipeline::{
 };
 use koharu_renderer::RenderDiagnostic;
 use koharu_scene::{
-    Commit, EntityId, LanguageTag, RasterLayer, RasterLayerKind, Revision, Snapshot,
+    Commit, EntityId, LanguageTag, PageStatus, RasterLayer, RasterLayerKind, Revision, Snapshot,
 };
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
@@ -413,6 +413,21 @@ impl Host for KoharuHost {
                         Ok((
                             project.move_page(page, arguments.index).await?,
                             json!({ "page": page }),
+                        ))
+                    })
+                })
+                .await
+                .map(|invocation| invocation.on_page(page))
+            }
+            "set_page_status" => {
+                let arguments: SetPageStatus = arguments(&call)?;
+                let page = entity(&arguments.page)?;
+                let status = PageStatus::from(arguments.status);
+                self.mutate(|project| {
+                    Box::pin(async move {
+                        Ok((
+                            project.set_page_status(vec![page], status).await?,
+                            json!({ "page": page, "status": status }),
                         ))
                     })
                 })
@@ -861,6 +876,11 @@ fn tools() -> &'static [Tool] {
                     "Move a page to a zero-based project index.",
                     metadata(ToolGroup::Pages),
                 ),
+                definition::<SetPageStatus>(
+                    "set_page_status",
+                    "Record how far a page's translation has come; Koharu shows it as a badge in the page list. Set translated_by_agent after translating a page, and needs_review when a page needs the owner's attention.",
+                    metadata(ToolGroup::Pages),
+                ),
                 definition::<DeletePages>(
                     "delete_pages",
                     "Delete pages and their contents.",
@@ -1220,6 +1240,32 @@ struct RenamePage {
 struct MovePage {
     page: String,
     index: usize,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SetPageStatus {
+    page: String,
+    status: AgentPageStatus,
+}
+
+#[derive(Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum AgentPageStatus {
+    NotStarted,
+    TranslatedByAgent,
+    NeedsReview,
+    Done,
+}
+
+impl From<AgentPageStatus> for PageStatus {
+    fn from(value: AgentPageStatus) -> Self {
+        match value {
+            AgentPageStatus::NotStarted => Self::NotStarted,
+            AgentPageStatus::TranslatedByAgent => Self::TranslatedByAgent,
+            AgentPageStatus::NeedsReview => Self::NeedsReview,
+            AgentPageStatus::Done => Self::Done,
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]

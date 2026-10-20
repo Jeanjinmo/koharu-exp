@@ -210,6 +210,7 @@ function installProject() {
       size: { width: 1000, height: 1500 },
       source_asset: 'source',
       layer_count: 1,
+      status: 'not_started',
     },
   ])
   queryClient.setQueryData(pageKey, page)
@@ -506,6 +507,7 @@ describe('greenfield editor', () => {
         size: page.size,
         source_asset: null,
         layer_count: 0,
+        status: 'not_started',
       })),
     )
     vi.spyOn(canvasRuntime, 'showCanvasPage').mockReturnValue(false)
@@ -570,6 +572,7 @@ describe('greenfield editor', () => {
         size: { width: 1000, height: 1500 },
         source_asset: null,
         layer_count: 0,
+        status: 'not_started',
       },
     ])
     vi.spyOn(canvasRuntime, 'showCanvasPage').mockReturnValue(true)
@@ -608,6 +611,7 @@ describe('greenfield editor', () => {
         size: page.size,
         source_asset: null,
         layer_count: 0,
+        status: 'not_started',
       },
     ])
     const prepared = { revision: 1, page }
@@ -641,6 +645,7 @@ describe('greenfield editor', () => {
         size: page.size,
         source_asset: null,
         layer_count: 0,
+        status: 'not_started',
       },
     ])
     const prefetch = vi
@@ -1818,6 +1823,7 @@ describe('greenfield editor', () => {
         size: { width: 1000, height: 1500 },
         source_asset: 'source',
         layer_count: 1,
+        status: 'not_started',
       },
     ])
     const stop = vi.spyOn(commands, 'stopJob').mockResolvedValue(null)

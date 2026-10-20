@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use anyhow::{Context as _, Result, bail};
 use koharu_pipeline::Bounds;
-use koharu_scene::{EntityId, RasterLayerKind, Snapshot, TextAlignment, WritingMode};
+use koharu_scene::{EntityId, PageStatus, RasterLayerKind, Snapshot, TextAlignment, WritingMode};
 use serde::Serialize;
 
 use crate::commands::{
@@ -20,6 +20,7 @@ pub(super) struct PageOutline {
     label: String,
     width: f64,
     height: f64,
+    status: PageStatus,
     elements: Vec<ElementOutline>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     raster_layers: Vec<RasterOutline>,
@@ -130,6 +131,9 @@ pub(super) fn page_outline(snapshot: &Snapshot, page: EntityId) -> Result<PageOu
         }
     }
     Ok(PageOutline {
+        status: snapshot
+            .component::<PageStatus>(view.id)?
+            .unwrap_or_default(),
         id: view.id,
         label: view.label,
         width: view.size.width,

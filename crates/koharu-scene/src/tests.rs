@@ -127,8 +127,9 @@ async fn built_in_component_schema_revisions_are_explicit() {
             schema::<TextContent>(),
             schema::<crate::components::Assets>(),
             schema::<Relation>(),
+            schema::<PageStatus>(),
         ],
-        [1; 18]
+        [1; 19]
     );
     assert_eq!(schema::<TextLayout>(), 2);
 }
@@ -156,6 +157,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             DetectionAnalysis::KIND,
             OcrAnalysis::KIND,
             crate::components::Assets::KIND,
+            PageStatus::KIND,
         ],
         [
             "dev.koharu.project",
@@ -177,8 +179,41 @@ async fn built_in_component_kinds_express_domain_ownership() {
             "dev.koharu.analysis.detection",
             "dev.koharu.analysis.ocr",
             "dev.koharu.assets",
+            "dev.koharu-exp.page.status",
         ]
     );
+}
+
+#[tokio::test]
+async fn page_status_lives_on_pages_and_survives_reopening() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("status.khrproj");
+    let (reviewed, untouched) = {
+        let mut session = Session::create(&path).await.unwrap();
+        let mut edit = session.snapshot().edit();
+        let reviewed = edit.add_page(page(), At::End).unwrap();
+        let untouched = edit.add_page(page(), At::End).unwrap();
+        edit.set(reviewed, &PageStatus::NeedsReview).unwrap();
+        let snapshot = session
+            .commit(edit.finish().unwrap())
+            .await
+            .unwrap()
+            .snapshot;
+        assert_eq!(snapshot.component::<PageStatus>(untouched).unwrap(), None);
+
+        let mut edit = snapshot.edit();
+        let content = edit.add_text_content(reviewed, At::End).unwrap();
+        edit.set(content, &PageStatus::Done).unwrap();
+        assert!(edit.finish().is_err());
+        (reviewed, untouched)
+    };
+
+    let reopened = Session::open(&path).await.unwrap().snapshot();
+    assert_eq!(
+        reopened.component::<PageStatus>(reviewed).unwrap(),
+        Some(PageStatus::NeedsReview)
+    );
+    assert_eq!(reopened.component::<PageStatus>(untouched).unwrap(), None);
 }
 
 #[tokio::test]

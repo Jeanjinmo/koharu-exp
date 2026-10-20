@@ -298,7 +298,14 @@
     "rename": "Rename",
     "renameDescription": "Choose a new name for this page.",
     "renameTitle": "Rename page",
-    "selected": "{{count}} selected"
+    "selected": "{{count}} selected",
+    "status": "Status",
+    "statuses": {
+      "done": "Done",
+      "needs_review": "Needs review",
+      "not_started": "Not started",
+      "translated_by_agent": "Translated by agent"
+    }
   },
   "outputPicker": {
     "instructions": "Translation instructions",
@@ -463,6 +470,7 @@
         "rename_page": "Changes a page's name in the page list. Can be undone. No vision needed.",
         "run_pipeline": "Runs Koharu's processing pipeline (detection, OCR, translation, inpainting) on the project, some pages, some elements, or one area. Its edits can be undone, and a long run stops when you use Stop now. No vision needed.",
         "set_geometry": "Replaces the outline of a text element on the page. Can be undone. Works without vision, but shapes are better when the model can see the page.",
+        "set_page_status": "Sets a page's status in the page list: not started, translated by agent, needs review, or done. Agents mark pages they translated or that need your attention. Can be undone. No vision needed.",
         "set_source_text": "Replaces the original-language text of an element, for example to fix an OCR mistake. Can be undone. No vision needed.",
         "set_translation": "Sets or removes one element's translation, tagged with its language so lines break correctly, and warns when the text does not fit. Can be undone. No vision needed.",
         "set_translations": "Sets the translations of many elements in one step; if one element is invalid, nothing changes. One Undo reverts the whole call. Warns when text does not fit. No vision needed.",
@@ -487,6 +495,7 @@
         "rename_page": "Rename a page",
         "run_pipeline": "Run processing stages",
         "set_geometry": "Reshape an element",
+        "set_page_status": "Mark a page's progress",
         "set_source_text": "Replace source text",
         "set_translation": "Set one translation",
         "set_translations": "Set many translations at once",

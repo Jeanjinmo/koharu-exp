@@ -5,7 +5,7 @@ use image::{DynamicImage, GrayImage, ImageFormat, RgbaImage};
 use koharu_desktop::Frame;
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, Authored, Commit, EntityId, EntityOrigin,
-    Geometry as SceneGeometry, Group as SceneGroup, LanguageTag, Origin, PageDraft,
+    Geometry as SceneGeometry, Group as SceneGroup, LanguageTag, Origin, PageDraft, PageStatus,
     Point as ScenePoint, Presents, RasterLayer as SceneRasterLayer, RasterLayerKind,
     Region as SceneRegion, RemovePolicy, Revision, Session, Snapshot,
     SourceText as SceneSourceText, TextGroup as SceneTextGroup, TextLayout as SceneTextLayout,
@@ -62,6 +62,7 @@ pub struct PageSummary {
     pub source_asset: Option<String>,
     #[specta(type = f64)]
     pub layer_count: usize,
+    pub status: PageStatus,
 }
 
 #[derive(Clone, Debug, Serialize, Type)]
@@ -354,6 +355,9 @@ impl Project {
                     },
                     source_asset,
                     layer_count,
+                    status: snapshot
+                        .component::<PageStatus>(page.id())?
+                        .unwrap_or_default(),
                 })
             })
             .collect()
@@ -364,6 +368,31 @@ impl Project {
         let current = snapshot.page(page)?.page()?;
         let patch = snapshot.patch(|edit| {
             edit.set_page(page, PageDraft::new(label, current.width, current.height))
+        })?;
+        self.commit(patch).await
+    }
+
+    /// Records how far the translation of `pages` has come, in one commit.
+    pub(crate) async fn set_page_status(
+        &mut self,
+        pages: Vec<EntityId>,
+        status: PageStatus,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        for page in &pages {
+            snapshot
+                .page(*page)
+                .with_context(|| format!("{page} is not a page"))?;
+        }
+        let patch = snapshot.patch(|edit| {
+            for page in pages {
+                // Pages without a status have not been started.
+                match status {
+                    PageStatus::NotStarted => edit.remove::<PageStatus>(page)?,
+                    status => edit.set(page, &status)?,
+                }
+            }
+            Ok(())
         })?;
         self.commit(patch).await
     }
@@ -1534,6 +1563,41 @@ mod tests {
                 .unwrap()
                 .label,
             "latest manual"
+        );
+    }
+
+    #[tokio::test]
+    async fn page_status_changes_in_one_undo_step_and_clears_to_not_started() {
+        let (mut project, page, _) = project_with_text(0).await;
+        let status = |project: &Project| Project::pages(&project.snapshot()).unwrap()[0].status;
+        assert_eq!(status(&project), PageStatus::NotStarted);
+
+        let commit = project
+            .set_page_status(vec![page], PageStatus::NeedsReview)
+            .await
+            .unwrap();
+        project.record_commit(&commit);
+        assert_eq!(status(&project), PageStatus::NeedsReview);
+        project.undo().await.unwrap();
+        assert_eq!(status(&project), PageStatus::NotStarted);
+
+        project
+            .set_page_status(vec![page], PageStatus::Done)
+            .await
+            .unwrap();
+        project
+            .set_page_status(vec![page], PageStatus::NotStarted)
+            .await
+            .unwrap();
+        assert_eq!(
+            project.snapshot().component::<PageStatus>(page).unwrap(),
+            None
+        );
+        assert!(
+            project
+                .set_page_status(vec![EntityId::new()], PageStatus::Done)
+                .await
+                .is_err()
         );
     }
 

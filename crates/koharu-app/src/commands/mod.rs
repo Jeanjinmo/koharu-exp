@@ -85,6 +85,7 @@ pub fn bindings() -> tauri_specta::Builder<tauri_runtime_cef::CefRuntime> {
             lifecycle::import,
             lifecycle::select_page,
             editing::rename_page,
+            editing::set_page_status,
             editing::delete_pages,
             editing::move_page,
             editing::set_source_text,

@@ -66,6 +66,24 @@ impl Component for Page {
     }
 }
 
+/// How far the translation of one page has come. A page without this
+/// component has not been started. The `koharu-exp` namespace keeps the kind
+/// apart from components that official Koharu releases might add later.
+#[revisioned(revision = 1)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PageStatus {
+    #[default]
+    NotStarted,
+    TranslatedByAgent,
+    NeedsReview,
+    Done,
+}
+
+impl Component for PageStatus {
+    const KIND: &'static str = "dev.koharu-exp.page.status";
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PageDraft {
     pub label: String,

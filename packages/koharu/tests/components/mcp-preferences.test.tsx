@@ -172,6 +172,7 @@ describe('MCP tools settings', () => {
         size: { width: 1, height: 1 },
         source_asset: null,
         layer_count: 0,
+        status: 'not_started',
       },
       {
         id: 'page-2',
@@ -179,6 +180,7 @@ describe('MCP tools settings', () => {
         size: { width: 1, height: 1 },
         source_asset: null,
         layer_count: 0,
+        status: 'not_started',
       },
     ])
     useKoharuStore.setState({

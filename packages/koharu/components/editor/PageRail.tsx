@@ -34,6 +34,7 @@ import {
   type CanvasPagePreparation,
   type Page,
   type PageImportSource,
+  type PageStatus,
   type PageSummary,
   type ProjectInfo,
 } from '@koharu/bridge/protocol'
@@ -49,7 +50,11 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@koharu/ui/components/dropdown-menu'
@@ -59,6 +64,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@koharu/ui/components/t
 import { cn } from '@koharu/ui/lib/utils'
 
 const emptyPages: PageSummary[] = []
+const pageStatuses: readonly PageStatus[] = [
+  'not_started',
+  'translated_by_agent',
+  'needs_review',
+  'done',
+]
 
 interface IntentPrefetchState {
   project: string
@@ -212,6 +223,16 @@ export function PageRail() {
       })
       .catch(() => undefined)
 
+  // A status chosen for one of several selected pages applies to all of them.
+  const setStatus = (page: string, status: PageStatus) =>
+    void call(
+      commands.setPageStatus,
+      selected.length > 1 && selected.includes(page) ? selected : [page],
+      status,
+    )
+      .then(() => refresh(projectKey, pagesKey))
+      .catch(() => undefined)
+
   const openRename = (page: PageSummary) => {
     setRenaming(page)
     setRenameValue(page.label)
@@ -315,6 +336,7 @@ export function PageRail() {
                       onDragStart={() => setDragged(page.id)}
                       onDragEnd={() => setDragged(null)}
                       onRename={() => openRename(page)}
+                      onStatus={(status) => setStatus(page.id, status)}
                       onDelete={() => deletePage(page.id)}
                       onDrop={() => {
                         if (dragged && dragged !== page.id) {
@@ -458,6 +480,7 @@ function PageItem({
   onDragStart,
   onDragEnd,
   onRename,
+  onStatus,
   onDelete,
   onDrop,
 }: {
@@ -470,6 +493,7 @@ function PageItem({
   onDragStart: () => void
   onDragEnd: () => void
   onRename: () => void
+  onStatus: (status: PageStatus) => void
   onDelete: () => void
   onDrop: () => void
 }) {
@@ -530,12 +554,34 @@ function PageItem({
             <DropdownMenuContent align='end'>
               <DropdownMenuItem onClick={onRename}>{t('navigator.rename')}</DropdownMenuItem>
               <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>{t('navigator.status')}</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={page.status}
+                  onValueChange={(status) => onStatus(status as PageStatus)}
+                >
+                  {pageStatuses.map((status) => (
+                    <DropdownMenuRadioItem key={status} value={status}>
+                      {t(`navigator.statuses.${status}`)}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
               <DropdownMenuItem variant='destructive' onClick={onDelete}>
                 <Trash2 /> {t('navigator.delete')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+        {page.status !== 'not_started' && (
+          <span
+            data-status={page.status}
+            className='mt-1 inline-flex h-4 items-center rounded-full px-1.5 text-[9px] font-medium data-[status=done]:bg-emerald-500/15 data-[status=done]:text-emerald-700 data-[status=needs_review]:bg-amber-500/15 data-[status=needs_review]:text-amber-700 data-[status=translated_by_agent]:bg-sky-500/15 data-[status=translated_by_agent]:text-sky-700 dark:data-[status=done]:text-emerald-300 dark:data-[status=needs_review]:text-amber-300 dark:data-[status=translated_by_agent]:text-sky-300'
+          >
+            {t(`navigator.statuses.${page.status}`)}
+          </span>
+        )}
         <p className='mt-1 text-[9px] leading-3.5 text-muted-foreground'>
           {t('navigator.layerCount', { count: page.layer_count })}
         </p>

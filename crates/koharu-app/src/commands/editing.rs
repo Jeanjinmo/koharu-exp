@@ -1,6 +1,6 @@
 use anyhow::Context as _;
 use koharu_desktop::{CanvasState, Desktop};
-use koharu_scene::EntityId;
+use koharu_scene::{EntityId, PageStatus};
 use serde::Deserialize;
 use specta::Type;
 use tauri::State;
@@ -50,6 +50,27 @@ pub(crate) async fn rename_page(
         let mut project = project.project.lock().await;
         let project = project.as_mut().context("no project is open")?;
         let commit = project.rename_page(page, label).await?;
+        project.record_commit(&commit);
+        (commit, project.active_page())
+    };
+    let canvas = synchronize_canvas(&desktop, &commit, page).await?;
+    canvas_channel.channel.publish(canvas);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_page_status(
+    pages: Vec<EntityId>,
+    status: PageStatus,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<(), Error> {
+    let (commit, page) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        let commit = project.set_page_status(pages, status).await?;
         project.record_commit(&commit);
         (commit, project.active_page())
     };
