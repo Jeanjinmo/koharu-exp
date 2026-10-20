@@ -8,7 +8,7 @@ Manual ini untuk pemilik: menguji langsung di PC Windows semua fitur Fase 3 (gel
 
 ## 1. Persiapan (sekali)
 
-1. Buka tab Actions di repo fork, pilih run **Build** terbaru yang hijau di branch `feat/custom` (commit `de08e5c` atau lebih baru), lalu unduh artifact `koharu-windows-latest`.
+1. Buka tab Actions di repo fork, pilih run **Build** terbaru yang hijau di branch `feat/custom`, lalu unduh artifact `koharu-windows-latest`. Artifact hanya disimpan **3 hari**. Kalau sudah kedaluwarsa, buka workflow **Build**, klik **Run workflow**, pilih branch `feat/custom`, lalu unduh dari run baru itu.
 2. Tutup Koharu resmi. Ganti hanya `koharu.exe` di `D:\Dev\clone-projects\koharu-exp-run\koharu-windows-latest\`.
 3. Backup `%USERPROFILE%\.koharu\config.toml` dan `%USERPROFILE%\.koharu\mcp.json`.
 4. Buat **project tes baru**, jangan project penting. Siapkan bahannya:
@@ -28,12 +28,12 @@ Satu putaran ini menyentuh semua gelombang. Kalau semua lolos, sisa manual tingg
    - **Edit → Undo** sekali membatalkan semua terjemahan dari panggilan itu.
 3. ⭐ Minta agent `remove` satu balon saja. Hanya area balon itu yang berubah; logo dan balon lain tetap.
 4. ⭐ Tekan **C** (Compare). Coba ketiga mode lewat panah kecil di tombol **Compare** di status bar.
-5. ⭐ Jalankan **File → Import references…** dengan PDF terjemahan. Di daftar pasangan, klik **Skip** pada halaman sampul, lalu **Attach**. Halaman mendapat badge **Reference**.
+5. ⭐ Jalankan **File → Import references…** dengan PDF terjemahan. Di daftar pasangan, klik **Skip** pada halaman sampul, lalu **Attach N references**. Halaman mendapat badge **Reference**.
 6. ⭐ Buka **View → Align reference…**. Geser referensi sedikit, lalu klik **Apply to following pages**.
 7. ⭐ Jalankan **Process → Extract text from references**. Muncul notifikasi jumlah area teks yang terisi. Pilih satu balon: di Inspector (tab Properties) tampil **Reference (…)** di antara source dan translation.
 8. ⭐ Untuk satu balon yang tidak terisi, klik **Read from reference…**, lalu tarik kotak di atas teks referensinya. Teks masuk ke balon itu.
 9. ⭐ Buka tab **Glossary** di panel kanan dan tambah satu istilah. Minta agent `read_glossary`; istilah itu harus muncul.
-10. ⭐ Export PNG (**File → Export**). Hasilnya **tidak** memuat gambar referensi, hanya raw yang sudah diedit.
+10. ⭐ Export PNG (**File → Export Project → PNG…**). Hasilnya **tidak** memuat gambar referensi, hanya raw yang sudah diedit.
 11. ⭐ Di project tes: jalankan **File → Clear project…**, lalu Undo; semua halaman kembali. Lalu jalankan **File → Free up disk space…**; ukuran folder `.khrproj` di `Documents\Koharu` mengecil.
 
 ## 3. Gelombang 3A — tool MCP baru
@@ -111,11 +111,10 @@ Semua tes 3A dijalankan lewat agent (klien MCP).
   - opsional **Trim margins**;
   - lalu **Choose files…** (PDF, CBZ, ZIP, RAR, gambar) atau **Choose folder…**.
 - [ ] ⭐ Daftar pasangan muncul berurutan, dengan thumbnail raw dan referensi.
-  - **Skip** membuang satu referensi, dan referensi sesudahnya naik satu halaman.
-  - **No reference here** mengosongkan satu halaman, dan referensi sesudahnya turun satu halaman.
-  - **Pair again** membatalkan keduanya.
+  - **Skip** membuang satu referensi, dan referensi sesudahnya naik satu halaman. Referensi itu pindah ke baris **Skipped:**; klik namanya untuk memasangkannya lagi.
+  - **No reference here** mengosongkan satu halaman, dan referensi sesudahnya turun satu halaman. Tombolnya lalu menjadi **Pair again** untuk membatalkannya.
 - [ ] Ringkasan jumlah pasangan dan referensi sisa benar. Halaman yang sudah punya referensi bertulisan "Replaces the current reference".
-- [ ] **Attach** sekali, lalu Undo sekali menghapus semua referensi dari import itu.
+- [ ] **Attach N references** sekali, lalu Undo sekali menghapus semua referensi dari import itu.
 - [ ] **Cancel** atau **Choose other files** tidak menulis apa pun ke project.
 - [ ] PDF besar (misalnya 50+ halaman): import selesai tanpa aplikasi kehabisan memori. Bila sempat, catat pemakaian memori di Task Manager.
 - [ ] Menu ⋯ halaman → **Remove reference** menghapus referensi halaman itu, atau semua halaman terpilih yang punya referensi.
@@ -145,15 +144,16 @@ Semua tes 3A dijalankan lewat agent (klien MCP).
 - [ ] Setelah selesai, notifikasi menyebut berapa area terisi dan berapa yang tidak cocok. Balon yang tidak cocok bertulisan "Nothing from the reference yet…" di Inspector.
 - [ ] Undo sekali membatalkan seluruh hasil Extract dari satu run (Detection dan OCR sebelumnya punya langkah undo sendiri).
 - [ ] Terjemahan yang Anda ketik sendiri **tidak ditimpa** ketika Extract dijalankan ulang.
-- [ ] Jalankan pipeline Translation (Process → Run Translation) pada halaman yang referensinya **berbahasa lain**: hasil terjemahan jelas memakai makna dan istilah dari referensi.
-- [ ] Jalankan Translation pada halaman yang referensinya **sebahasa**: terjemahan sama dengan teks referensi, dan model tidak perlu dimuat untuk halaman itu.
+- [ ] Jalankan **Process → Run Translation** (berlaku untuk seluruh project). Terjemahan yang Anda ketik sendiri atau yang ditulis agent tidak ditimpa, jadi periksa balon lain:
+  - referensinya **berbahasa lain**: hasil terjemahan jelas memakai makna dan istilah dari referensi;
+  - referensinya **sebahasa**: terjemahannya tetap sama dengan teks referensi.
 
 **Read from reference… (pasangan manual)**
 - [ ] ⭐ Pilih satu balon yang tidak cocok, lalu klik **Read from reference…** di Inspector. Referensi tampil di atas halaman. Tarik kotak di atas teks yang benar, dan teks masuk ke balon itu dalam satu Undo.
 - [ ] Esc atau Cancel keluar tanpa membaca. Klik tanpa menarik kotak diabaikan.
 
 **Tidak ikut export dan render**
-- [ ] ⭐ Export PNG, PSD, dan CBZ: referensi **tidak** ikut. Canvas normal juga tidak menampilkan referensi; referensi hanya tampil di Compare dan saat mengalign atau memilih area.
+- [ ] ⭐ **File → Export Project** ke PNG, PSD, dan CBZ: referensi **tidak** ikut. Canvas normal juga tidak menampilkan referensi; referensi hanya tampil di Compare dan saat mengalign atau memilih area.
 - [ ] `inspect_page` lewat MCP menampilkan `reference` per elemen yang punya teks referensi.
 
 ## 7. Gelombang 3E — Glosarium
@@ -171,7 +171,7 @@ Semua tes 3A dijalankan lewat agent (klien MCP).
 
 ## 8. Yang tidak bisa diuji di cloud — perhatikan khusus
 
-Sesi pengerja sudah menjalankan semua tes otomatis di cloud: Rust (scene, storage, pipeline, translator, agent, app), clippy, lint, typecheck, dan 135 tes UI. Tes otomatis memakai data sintetis. Hal berikut **hanya** bisa dibuktikan di PC Anda:
+Selama pengerjaan, sesi pengerja menjalankan di cloud: fmt dan clippy, tes Rust untuk setiap crate yang diubah, lint, typecheck, dan seluruh 135 tes UI. Semua lulus, dan build Windows di Actions hijau. Tes otomatis memakai data sintetis. Hal berikut **hanya** bisa dibuktikan di PC Anda:
 
 1. **Model ML nyata dan GPU**:
    - layout detection pada **halaman referensi** (komik berbahasa Inggris atau Indonesia);
@@ -207,10 +207,11 @@ Lampiran: screenshot, file log dari %LOCALAPPDATA%\Koharu\logs, nama halaman/pro
 
 - **Free up disk space** mengosongkan riwayat undo dan tidak bisa dibatalkan. Dialognya memberi tahu ini.
 - Teks UI baru hanya dalam bahasa Inggris; bahasa lain memakai teks Inggris untuk kunci baru.
-- Saat referensi diimpor, attach, detach, extract, atau read sedang tidak bisa dijalankan karena ada proses pipeline, muncul pesan bahwa referensi tidak bisa diubah atau dibaca selama processing. Ini menjaga commit pipeline tetap aman.
+- Selama pipeline berjalan, memasang, melepas, dan membaca referensi ditolak dengan pesan error. Jalankan lagi setelah pipeline selesai. Ini menjaga commit pipeline tetap aman.
 - **Extract** selalu memakai PaddleOCR-VL untuk referensi apa pun model OCR halaman, karena MangaOCR, Baberu, dan Hayai hanya membaca bahasa Jepang.
 - Bubble yang berisi dua teks Jepang terpisah: teks referensi masuk ke teks pertama saja. Teks kedua dibiarkan, dan tidak dihitung sebagai "tidak cocok".
-- Provider terjemahan Caiyun (mesin terjemah, bukan LLM) tidak memakai referensi dan glosarium.
+- Balon yang tidak mendapat teks referensi ditandai di Inspector ("Nothing from the reference yet…") dan dihitung di notifikasi setelah Extract. Belum ada penanda di canvas; kalau saat uji terasa perlu, catat sebagai permintaan.
+- Provider mesin terjemah (DeepL, Google Cloud, Caiyun) tidak memakai referensi berbahasa lain maupun glosarium; semua provider LLM, termasuk model lokal, memakainya. Referensi yang sebahasa tetap disalin menjadi terjemahan untuk provider apa pun.
 - Pasangan manual dibuat lewat **Read from reference…** di Inspector, yang menampilkan referensi di atas halaman seperti Compare. Cara ini dipilih karena lebih jelas daripada memasangkan dua kotak di dua panel.
 
 ## Lampiran — jawaban pertanyaan terbuka PRD §9
