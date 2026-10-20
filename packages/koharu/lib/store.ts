@@ -35,7 +35,7 @@ export type InspectorSection = 'copy' | 'type' | 'layers'
 export type ShortcutAction = CanvasTool | 'fit'
 export type Shortcuts = Record<ShortcutAction, string>
 export type PipelineScope = 'page' | 'selected-pages' | 'project'
-export type ProjectCleanup = 'free-space'
+export type ProjectCleanup = 'clear' | 'free-space'
 export const pipelineStages: readonly Stage[] = ['detection', 'ocr', 'translation', 'inpainting']
 
 interface KoharuStore {

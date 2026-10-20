@@ -1,7 +1,7 @@
 'use client'
 
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { FilePlus2, FolderOpen, HardDrive, LoaderCircle, Settings } from 'lucide-react'
+import { FilePlus2, FolderOpen, HardDrive, LoaderCircle, Settings, Trash2 } from 'lucide-react'
 import Image from 'next/image'
 import { useState, type ComponentProps } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -134,6 +134,14 @@ export function TitleBar() {
               <MenubarItem disabled={!project} onClick={() => setCleanup('free-space')}>
                 <HardDrive />
                 {t('cleanup.freeSpace')}
+              </MenubarItem>
+              <MenubarItem
+                disabled={!project || pages.length === 0}
+                variant='destructive'
+                onClick={() => setCleanup('clear')}
+              >
+                <Trash2 />
+                {t('cleanup.clear')}
               </MenubarItem>
               <MenubarSeparator />
               <MenubarItem disabled={!project} onClick={closeProject}>

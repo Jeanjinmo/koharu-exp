@@ -296,6 +296,14 @@ export function PageRail() {
               <DropdownMenuItem onClick={() => setCleanup('free-space')}>
                 <HardDrive /> {t('cleanup.freeSpace')}
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant='destructive'
+                disabled={pages.length === 0}
+                onClick={() => setCleanup('clear')}
+              >
+                <Trash2 /> {t('cleanup.clear')}
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </header>

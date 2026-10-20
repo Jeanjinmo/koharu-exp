@@ -60,7 +60,15 @@
     "unavailable": "WebGPU canvas unavailable"
   },
   "cleanup": {
+    "alsoFreeSpace": "Also free up disk space",
+    "alsoFreeSpaceHint": "Deletes the cleared pages from disk too. Clearing then cannot be undone.",
     "cannotUndo": "This cannot be undone, and the undo history is cleared.",
+    "clear": "Clear project…",
+    "clearAction": "Clear project",
+    "clearDescription": "Delete all {{count}} pages from “{{name}}”? The project stays open, and Undo brings the pages back.",
+    "clearDescription_one": "Delete the only page from “{{name}}”? The project stays open, and Undo brings the page back.",
+    "clearDescription_other": "Delete all {{count}} pages from “{{name}}”? The project stays open, and Undo brings the pages back.",
+    "clearTitle": "Clear project?",
     "freed": "Freed {{size}}",
     "freeSpace": "Free up disk space…",
     "freeSpaceAction": "Free up space",
