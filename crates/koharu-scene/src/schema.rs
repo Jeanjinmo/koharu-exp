@@ -5,10 +5,10 @@
 //! relation endpoints.
 
 use crate::{
-    BubbleRegion, DetectionAnalysis, EntityId, EntityOrigin, Error, Geometry, Group, OcrAnalysis,
-    Page, PageReference, PageStatus, Project, RasterLayer, ReferenceText, Region, RegionSpec,
-    Relation, Result, SourceText, TextContent, TextGroup, TextLayout, TextRegion, TextRole,
-    Translation, Typography, Visibility,
+    BubbleRegion, DetectionAnalysis, EntityId, EntityOrigin, Error, Geometry, Glossary, Group,
+    OcrAnalysis, Page, PageReference, PageStatus, Project, RasterLayer, ReferenceText, Region,
+    RegionSpec, Relation, Result, SourceText, TextContent, TextGroup, TextLayout, TextRegion,
+    TextRole, Translation, Typography, Visibility,
     component::{Component, ComponentRecord, ValidationContext, decode, key},
     components::Assets,
     state::{Components, State},
@@ -64,6 +64,7 @@ component_schema! {
     PAGE_STATUS = 18 => PageStatus,
     PAGE_REFERENCE = 19 => PageReference,
     REFERENCE_TEXT = 20 => ReferenceText,
+    GLOSSARY = 21 => Glossary,
 }
 
 pub(crate) fn validate_components(
@@ -107,7 +108,11 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
         })
     });
 
-    if has(PAGE_STATUS) && !has(PAGE) {
+    if has(GLOSSARY) {
+        Err(Error::invalid(format!(
+            "entity {id} has a glossary, which belongs to the project"
+        )))
+    } else if has(PAGE_STATUS) && !has(PAGE) {
         Err(Error::invalid(format!(
             "entity {id} has a page status but is not a page"
         )))

@@ -20,7 +20,18 @@ pub struct TranslationRequest {
     /// What a published translation of the work says for some segments, by
     /// segment index.
     pub references: BTreeMap<usize, SegmentReference>,
+    /// Terms the translation must keep, usually those the segments use.
+    pub glossary: Vec<GlossaryTerm>,
     pub image: Option<Arc<DynamicImage>>,
+}
+
+/// A term of the work and the translation it always keeps.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct GlossaryTerm {
+    pub term: String,
+    pub translation: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// A segment's text in a published translation of the work, which
@@ -45,8 +56,15 @@ impl TranslationRequest {
             instructions: None,
             context: Vec::new(),
             references: BTreeMap::new(),
+            glossary: Vec::new(),
             image: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_glossary(mut self, glossary: impl IntoIterator<Item = GlossaryTerm>) -> Self {
+        self.glossary = glossary.into_iter().collect();
+        self
     }
 
     #[must_use]

@@ -3,6 +3,7 @@ pub(crate) mod area;
 pub(crate) mod canvas;
 pub(crate) mod editing;
 pub(crate) mod fonts;
+pub(crate) mod glossary;
 pub(crate) mod import;
 pub(crate) mod lifecycle;
 pub(crate) mod mcp;
@@ -98,6 +99,9 @@ pub fn bindings() -> tauri_specta::Builder<tauri_runtime_cef::CefRuntime> {
             editing::set_visibility,
             editing::delete_layers,
             editing::move_layer,
+            glossary::get_glossary,
+            glossary::set_glossary_term,
+            glossary::remove_glossary_term,
             editing::undo,
             editing::redo,
             processing::process,

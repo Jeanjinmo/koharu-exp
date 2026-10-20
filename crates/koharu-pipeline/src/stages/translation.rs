@@ -1,9 +1,10 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use koharu_scene::{
-    Authored, EntityId, LanguageTag, Origin, ReferenceText, SourceText, Translation,
+    Authored, EntityId, Glossary, GlossaryEntry, LanguageTag, Origin, ReferenceText, SourceText,
+    Translation,
 };
-use koharu_translator::{Language, SegmentReference, TranslationRequest, Translator};
+use koharu_translator::{GlossaryTerm, Language, SegmentReference, TranslationRequest, Translator};
 
 use crate::TranslationConfig;
 
@@ -141,8 +142,20 @@ impl StageProcessor for Processor {
         let (provider, mut translated) = if segments.is_empty() {
             ("reference", Vec::new().into_iter())
         } else {
+            let glossary = input
+                .scene
+                .project_component::<Glossary>()?
+                .map(|glossary| glossary.entries)
+                .unwrap_or_default();
+            let texts = segments
+                .iter()
+                .chain(references.iter().map(|(_, reference)| &reference.text))
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            let glossary = used_terms(glossary, &texts);
             let mut request = TranslationRequest::new(segments, self.config.target_language)
-                .with_references(references);
+                .with_references(references)
+                .with_glossary(glossary);
             if let Some(instructions) = self.config.instructions.as_deref() {
                 request = request.with_instructions(instructions);
             }
@@ -202,6 +215,27 @@ impl StageProcessor for Processor {
     }
 }
 
+/// The glossary entries whose term appears in any of `texts`, ignoring case,
+/// so a long glossary does not crowd every request.
+fn used_terms(entries: Vec<GlossaryEntry>, texts: &[&str]) -> Vec<GlossaryTerm> {
+    let texts = texts
+        .iter()
+        .map(|text| text.to_lowercase())
+        .collect::<Vec<_>>();
+    entries
+        .into_iter()
+        .filter(|entry| {
+            let term = entry.term.to_lowercase();
+            texts.iter().any(|text| text.contains(&term))
+        })
+        .map(|entry| GlossaryTerm {
+            term: entry.term,
+            translation: entry.translation,
+            note: entry.note,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -210,6 +244,29 @@ mod tests {
 
     use super::*;
     use crate::ImageCache;
+
+    #[test]
+    fn only_glossary_terms_the_text_uses_are_sent() {
+        let entry = |term: &str, translation: &str| GlossaryEntry {
+            term: term.to_owned(),
+            translation: translation.to_owned(),
+            note: None,
+        };
+        let used = used_terms(
+            vec![
+                entry("神様", "Sang Dewa"),
+                entry("ハル", "Haru"),
+                entry("Lord", "Tuan"),
+            ],
+            &["神様はどこ?", "MY LORD!"],
+        );
+        assert_eq!(
+            used.iter()
+                .map(|term| term.term.as_str())
+                .collect::<Vec<_>>(),
+            ["神様", "Lord"]
+        );
+    }
 
     #[tokio::test]
     async fn references_in_the_target_language_become_the_translation_without_a_translator() {

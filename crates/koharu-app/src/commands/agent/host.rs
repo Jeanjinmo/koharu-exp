@@ -16,7 +16,8 @@ use koharu_pipeline::{
 };
 use koharu_renderer::RenderDiagnostic;
 use koharu_scene::{
-    Commit, EntityId, LanguageTag, PageStatus, RasterLayer, RasterLayerKind, Revision, Snapshot,
+    Commit, EntityId, GlossaryEntry, LanguageTag, PageStatus, RasterLayer, RasterLayerKind,
+    Revision, Snapshot,
 };
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
@@ -433,6 +434,39 @@ impl Host for KoharuHost {
                 })
                 .await
                 .map(|invocation| invocation.on_page(page))
+            }
+            "read_glossary" => {
+                let _: ReadGlossary = arguments(&call)?;
+                Invocation::read(json!({
+                    "terms": Project::glossary(&self.snapshot().await?)?,
+                }))
+            }
+            "set_glossary_terms" => {
+                let arguments: SetGlossaryTerms = arguments(&call)?;
+                let changes = arguments
+                    .terms
+                    .into_iter()
+                    .map(|term| {
+                        (
+                            None,
+                            GlossaryEntry {
+                                term: term.term,
+                                translation: term.translation,
+                                note: term.note,
+                            },
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let count = changes.len();
+                self.mutate(|project| {
+                    Box::pin(async move {
+                        Ok((
+                            project.set_glossary_terms(changes).await?,
+                            json!({ "terms": count }),
+                        ))
+                    })
+                })
+                .await
             }
             "delete_pages" => {
                 let arguments: DeletePages = arguments(&call)?;
@@ -881,6 +915,16 @@ fn tools() -> &'static [Tool] {
                     "Record how far a page's translation has come; Koharu shows it as a badge in the page list. Set translated_by_agent after translating a page, and needs_review when a page needs the owner's attention.",
                     metadata(ToolGroup::Pages),
                 ),
+                definition::<ReadGlossary>(
+                    "read_glossary",
+                    "Read the project glossary: terms and names as the source text writes them, with the translation each must keep and an optional note. Read it before translating and keep its terms; set_translations does not apply it for you.",
+                    metadata(ToolGroup::Read),
+                ),
+                definition::<SetGlossaryTerms>(
+                    "set_glossary_terms",
+                    "Add terms to the project glossary, or change the translation or note of terms it has, in one undoable step. Add the names and terms you settle on, so later pages and the built-in translation keep them.",
+                    metadata(ToolGroup::Text),
+                ),
                 definition::<DeletePages>(
                     "delete_pages",
                     "Delete pages and their contents.",
@@ -1266,6 +1310,24 @@ impl From<AgentPageStatus> for PageStatus {
             AgentPageStatus::Done => Self::Done,
         }
     }
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ReadGlossary {}
+
+#[derive(Deserialize, JsonSchema)]
+struct SetGlossaryTerms {
+    /// Terms to add, or to change when the glossary has them.
+    terms: Vec<AgentGlossaryTerm>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct AgentGlossaryTerm {
+    /// The term as the source text writes it.
+    term: String,
+    translation: String,
+    /// When to use the translation, or what the term means.
+    note: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]

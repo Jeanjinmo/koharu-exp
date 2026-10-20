@@ -5,12 +5,12 @@ use image::{DynamicImage, GrayImage, ImageFormat, RgbaImage};
 use koharu_desktop::Frame;
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, Authored, Commit, EntityId, EntityOrigin,
-    Geometry as SceneGeometry, Group as SceneGroup, LanguageTag, Origin, PageDraft, PageReference,
-    PageStatus, Point as ScenePoint, Presents, RasterLayer as SceneRasterLayer, RasterLayerKind,
-    ReferencePlacement, Region as SceneRegion, RemovePolicy, Revision, Session, Snapshot,
-    SourceText as SceneSourceText, TextGroup as SceneTextGroup, TextLayout as SceneTextLayout,
-    TextLayoutKind, Translation as SceneTranslation, Typography as SceneTypography,
-    Visibility as SceneVisibility,
+    Geometry as SceneGeometry, Glossary, GlossaryEntry, Group as SceneGroup, LanguageTag, Origin,
+    PageDraft, PageReference, PageStatus, Point as ScenePoint, Presents,
+    RasterLayer as SceneRasterLayer, RasterLayerKind, ReferencePlacement, Region as SceneRegion,
+    RemovePolicy, Revision, Session, Snapshot, SourceText as SceneSourceText,
+    TextGroup as SceneTextGroup, TextLayout as SceneTextLayout, TextLayoutKind,
+    Translation as SceneTranslation, Typography as SceneTypography, Visibility as SceneVisibility,
 };
 use serde::Serialize;
 use specta::Type;
@@ -508,6 +508,65 @@ impl Project {
                 )?;
             }
             Ok(())
+        })?;
+        self.commit(patch).await
+    }
+
+    /// The project's glossary, in the order its terms were added.
+    pub(crate) fn glossary(snapshot: &Snapshot) -> Result<Vec<GlossaryEntry>> {
+        Ok(snapshot
+            .project_component::<Glossary>()?
+            .map(|glossary| glossary.entries)
+            .unwrap_or_default())
+    }
+
+    /// Adds glossary entries or replaces them, in one commit. An entry with
+    /// a `previous` term replaces that entry, so a term can be renamed in
+    /// place; otherwise it replaces the entry with its own term, if any.
+    pub(crate) async fn set_glossary_terms(
+        &mut self,
+        changes: Vec<(Option<String>, GlossaryEntry)>,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        let mut entries = Self::glossary(&snapshot)?;
+        for (previous, entry) in changes {
+            let entry = GlossaryEntry {
+                term: entry.term.trim().to_owned(),
+                translation: entry.translation.trim().to_owned(),
+                note: entry
+                    .note
+                    .map(|note| note.trim().to_owned())
+                    .filter(|note| !note.is_empty()),
+            };
+            let replaced = previous.as_deref().unwrap_or(&entry.term);
+            if entry.term != replaced && entries.iter().any(|other| other.term == entry.term) {
+                bail!("the glossary already has the term {:?}", entry.term);
+            }
+            match entries.iter().position(|other| other.term == replaced) {
+                Some(index) => entries[index] = entry,
+                None => entries.push(entry),
+            }
+        }
+        self.commit_glossary(&snapshot, entries).await
+    }
+
+    pub(crate) async fn remove_glossary_terms(&mut self, terms: Vec<String>) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        let mut entries = Self::glossary(&snapshot)?;
+        entries.retain(|entry| !terms.contains(&entry.term));
+        self.commit_glossary(&snapshot, entries).await
+    }
+
+    async fn commit_glossary(
+        &mut self,
+        snapshot: &Snapshot,
+        entries: Vec<GlossaryEntry>,
+    ) -> Result<Commit> {
+        let exists = snapshot.project_component::<Glossary>()?.is_some();
+        let patch = snapshot.patch(|edit| match (entries.is_empty(), exists) {
+            (false, _) => edit.set_project(&Glossary { entries }),
+            (true, true) => edit.remove_project::<Glossary>(),
+            (true, false) => Ok(()),
         })?;
         self.commit(patch).await
     }
@@ -1850,6 +1909,69 @@ mod tests {
 
         project.detach_references(vec![first]).await.unwrap();
         assert!(project.place_references(pages, shifted).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn glossary_terms_are_added_renamed_kept_unique_and_removed() {
+        let (mut project, _, _) = project_with_text(0).await;
+        let entry = |term: &str, translation: &str, note: Option<&str>| GlossaryEntry {
+            term: term.to_owned(),
+            translation: translation.to_owned(),
+            note: note.map(str::to_owned),
+        };
+        let commit = project
+            .set_glossary_terms(vec![
+                (None, entry(" 神様 ", "Sang Dewa ", Some(" "))),
+                (None, entry("ハル", "Haru", None)),
+            ])
+            .await
+            .unwrap();
+        project.record_commit(&commit);
+        assert_eq!(
+            Project::glossary(&project.snapshot()).unwrap(),
+            [
+                entry("神様", "Sang Dewa", None),
+                entry("ハル", "Haru", None)
+            ]
+        );
+
+        // The same term replaces its entry; a rename keeps the place.
+        let commit = project
+            .set_glossary_terms(vec![
+                (None, entry("神様", "Dewa", Some("Formal"))),
+                (
+                    Some("ハル".to_owned()),
+                    entry("ハルちゃん", "Haru-chan", None),
+                ),
+            ])
+            .await
+            .unwrap();
+        project.record_commit(&commit);
+        assert_eq!(
+            Project::glossary(&project.snapshot()).unwrap(),
+            [
+                entry("神様", "Dewa", Some("Formal")),
+                entry("ハルちゃん", "Haru-chan", None)
+            ]
+        );
+        assert!(
+            project
+                .set_glossary_terms(vec![(
+                    Some("神様".to_owned()),
+                    entry("ハルちゃん", "x", None)
+                )])
+                .await
+                .is_err()
+        );
+
+        let commit = project
+            .remove_glossary_terms(vec!["神様".to_owned(), "ハルちゃん".to_owned()])
+            .await
+            .unwrap();
+        project.record_commit(&commit);
+        assert!(Project::glossary(&project.snapshot()).unwrap().is_empty());
+        project.undo().await.unwrap();
+        assert_eq!(Project::glossary(&project.snapshot()).unwrap().len(), 2);
     }
 
     #[tokio::test]

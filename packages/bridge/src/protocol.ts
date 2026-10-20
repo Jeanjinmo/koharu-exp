@@ -77,6 +77,10 @@ export const commands = {
 	setVisibility: (layers: EntityId[], visible: boolean | null, opacity: number | null) => __TAURI_INVOKE<null>("set_visibility", { layers, visible, opacity: opacity==null?opacity:opacity }),
 	deleteLayers: (layers: EntityId[]) => __TAURI_INVOKE<null>("delete_layers", { layers }),
 	moveLayer: (layer: EntityId, parent: EntityId, index: number) => __TAURI_INVOKE<Page>("move_layer", { layer, parent, index }).then((v) => (({...v,layers:v.layers.map(i=>i),regions:v.regions.map(i=>({...i,geometry:({...i.geometry,points:i.geometry.points.map(i=>i)})}))}) as typeof v)),
+	getGlossary: () => __TAURI_INVOKE<GlossaryEntry[]>("get_glossary"),
+	/**  Adds a term, or changes the one named `previous`, as one undo step. */
+	setGlossaryTerm: (previous: string | null, entry: GlossaryEntry) => __TAURI_INVOKE<null>("set_glossary_term", { previous, entry }),
+	removeGlossaryTerm: (term: string) => __TAURI_INVOKE<null>("remove_glossary_term", { term }),
 	undo: () => __TAURI_INVOKE<null>("undo"),
 	redo: () => __TAURI_INVOKE<null>("redo"),
 	process: (scope: Scope, operation: Operation) => __TAURI_INVOKE<JobId>("process", { scope, operation }),
@@ -317,6 +321,14 @@ export type Geometry = {
 export type GeometryUpdate = {
 	layer: EntityId,
 	points: Point[] | null,
+};
+
+export type GlossaryEntry = {
+	/**  The term as the source text writes it. */
+	term: string,
+	translation: string,
+	/**  When to use the translation, or what the term means. */
+	note: string | null,
 };
 
 export type GoogleCloudConfig = Record<string, never>;

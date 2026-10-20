@@ -130,8 +130,9 @@ async fn built_in_component_schema_revisions_are_explicit() {
             schema::<PageStatus>(),
             schema::<PageReference>(),
             schema::<ReferenceText>(),
+            schema::<Glossary>(),
         ],
-        [1; 21]
+        [1; 22]
     );
     assert_eq!(schema::<TextLayout>(), 2);
 }
@@ -162,6 +163,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             PageStatus::KIND,
             PageReference::KIND,
             ReferenceText::KIND,
+            Glossary::KIND,
         ],
         [
             "dev.koharu.project",
@@ -186,6 +188,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             "dev.koharu-exp.page.status",
             "dev.koharu-exp.page.reference",
             "dev.koharu-exp.text.reference",
+            "dev.koharu-exp.project.glossary",
         ]
     );
 }
@@ -294,6 +297,55 @@ async fn reference_text_belongs_to_text_content_and_survives_reopening() {
     assert_eq!(
         reopened.text_content(content).unwrap().reference().unwrap(),
         Some(reference)
+    );
+}
+
+#[tokio::test]
+async fn the_glossary_belongs_to_the_project_with_unique_terms() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("glossary.khrproj");
+    let entry = |term: &str, translation: &str| GlossaryEntry {
+        term: term.to_owned(),
+        translation: translation.to_owned(),
+        note: None,
+    };
+    let glossary = Glossary {
+        entries: vec![
+            entry("神様", "Sang Dewa"),
+            GlossaryEntry {
+                note: Some("Her nickname; never translate it.".to_owned()),
+                ..entry("ハル", "Haru")
+            },
+        ],
+    };
+    {
+        let mut session = Session::create(&path).await.unwrap();
+        let mut edit = session.snapshot().edit();
+        let page = edit.add_page(page(), At::End).unwrap();
+        edit.set_project(&glossary).unwrap();
+        let snapshot = session
+            .commit(edit.finish().unwrap())
+            .await
+            .unwrap()
+            .snapshot;
+
+        let mut edit = snapshot.edit();
+        edit.set(page, &glossary).unwrap();
+        assert!(edit.finish().is_err());
+        let twice = Glossary {
+            entries: vec![entry("神様", "God"), entry("神様", "Dewa")],
+        };
+        assert!(snapshot.edit().set_project(&twice).is_err());
+        let empty = Glossary {
+            entries: vec![entry("神様", " ")],
+        };
+        assert!(snapshot.edit().set_project(&empty).is_err());
+    }
+
+    let reopened = Session::open(&path).await.unwrap().snapshot();
+    assert_eq!(
+        reopened.project_component::<Glossary>().unwrap(),
+        Some(glossary)
     );
 }
 

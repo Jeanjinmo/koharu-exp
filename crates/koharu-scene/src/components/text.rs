@@ -243,6 +243,62 @@ impl Component for ReferenceText {
     }
 }
 
+/// The project's terms and names with the translation each keeps, which
+/// translation follows. It belongs to the project, not to a page.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Type)]
+pub struct Glossary {
+    /// In the order they were added; each term appears once.
+    pub entries: Vec<GlossaryEntry>,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+pub struct GlossaryEntry {
+    /// The term as the source text writes it.
+    pub term: String,
+    pub translation: String,
+    /// When to use the translation, or what the term means.
+    pub note: Option<String>,
+}
+
+impl Component for Glossary {
+    const KIND: &'static str = "dev.koharu-exp.project.glossary";
+
+    fn validate(&self, _context: &ValidationContext<'_>) -> Result<()> {
+        if self.entries.len() > 10_000 {
+            return Err(Error::invalid("glossary has more than 10000 terms"));
+        }
+        let mut terms = std::collections::HashSet::new();
+        for entry in &self.entries {
+            let fields = [
+                Some(&entry.term),
+                Some(&entry.translation),
+                entry.note.as_ref(),
+            ];
+            if entry.term.trim().is_empty()
+                || entry.translation.trim().is_empty()
+                || fields
+                    .into_iter()
+                    .flatten()
+                    .any(|field| field.len() > 4096 || field.contains('\0'))
+            {
+                return Err(Error::invalid(format!(
+                    "glossary term {:?} is empty, too long, or contains NUL",
+                    entry.term
+                )));
+            }
+            if !terms.insert(entry.term.as_str()) {
+                return Err(Error::invalid(format!(
+                    "glossary term {:?} appears twice",
+                    entry.term
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 fn validate_authored_text(value: &Authored<String>) -> Result<()> {
     if value.value.len() > 16 * 1024 * 1024 || value.value.contains('\0') {
         return Err(Error::invalid("text is too large or contains NUL"));

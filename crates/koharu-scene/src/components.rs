@@ -29,4 +29,7 @@ pub use structure::{
     EntityOrigin, Page, PageDraft, PageReference, PageStatus, Project, ReferencePlacement,
     Relation, RelationKind,
 };
-pub use text::{LanguageTag, ReferenceText, SourceText, TextContent, TextRole, Translation};
+pub use text::{
+    Glossary, GlossaryEntry, LanguageTag, ReferenceText, SourceText, TextContent, TextRole,
+    Translation,
+};

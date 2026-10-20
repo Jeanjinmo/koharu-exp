@@ -7,12 +7,13 @@ use serde_json::{Value, json};
 
 #[cfg(test)]
 use crate::SegmentReference;
-use crate::{Language, TranslationContext, TranslationRequest};
+use crate::{GlossaryTerm, Language, TranslationContext, TranslationRequest};
 
 pub(crate) fn prompts(request: &TranslationRequest) -> anyhow::Result<(String, String)> {
     let input = TranslationInput {
         source_language: request.source_language,
         target_language: request.target_language,
+        glossary: &request.glossary,
         context: &request.context,
         segments: request
             .segments
@@ -162,6 +163,16 @@ fn translation_system_prompt(request: &TranslationRequest) -> String {
         "}.trim_end());
     }
 
+    if !request.glossary.is_empty() {
+        prompt.push_str("\n\n");
+        prompt.push_str(indoc! {"
+            Glossary requirements:
+            - The input `glossary` lists terms of this work with the translation each keeps.
+            - Whenever a segment contains a glossary term, translate it exactly as its `translation`, adjusting only grammar the target language requires, and follow its `note` when present.
+            - Do not translate or return the glossary entries.
+        "}.trim_end());
+    }
+
     if !request.references.is_empty() {
         prompt.push_str("\n\n");
         prompt.push_str(
@@ -203,6 +214,8 @@ fn translation_system_prompt(request: &TranslationRequest) -> String {
 struct TranslationInput<'a> {
     source_language: Option<Language>,
     target_language: Language,
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    glossary: &'a [GlossaryTerm],
     context: &'a [TranslationContext],
     segments: Vec<TranslationInputSegment<'a>>,
 }
@@ -425,6 +438,28 @@ mod tests {
             !translation_system_prompt(&TranslationRequest::new(["x"], Language::English))
                 .contains("Reference requirements")
         );
+    }
+
+    #[test]
+    fn glossary_terms_go_with_the_input_and_bind_the_translation() {
+        let request =
+            TranslationRequest::new(["神様はどこ?"], Language::Indonesian).with_glossary([
+                GlossaryTerm {
+                    term: "神様".to_owned(),
+                    translation: "Sang Dewa".to_owned(),
+                    note: Some("Always capitalized.".to_owned()),
+                },
+            ]);
+        let (system, user) = prompts(&request).unwrap();
+        let input: serde_json::Value = serde_json::from_str(&user).unwrap();
+        assert_eq!(input["glossary"][0]["term"], "神様");
+        assert_eq!(input["glossary"][0]["translation"], "Sang Dewa");
+        assert_eq!(input["glossary"][0]["note"], "Always capitalized.");
+        assert!(system.contains("Glossary requirements"));
+
+        let (system, user) = prompts(&TranslationRequest::new(["x"], Language::English)).unwrap();
+        assert!(!system.contains("Glossary requirements"));
+        assert!(serde_json::from_str::<serde_json::Value>(&user).unwrap()["glossary"].is_null());
     }
 
     #[test]
