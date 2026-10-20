@@ -5,8 +5,10 @@ use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use koharu_agent::{Control, Host, Invocation, Tool, ToolCall, ToolGroup, ToolMetadata, Vision};
 use koharu_desktop::{Desktop, Frame};
-use koharu_pipeline::{Committer, Operation, RunStatus, Scope, Stage, StageOutput, StopToken};
-use koharu_scene::{Commit, EntityId, Snapshot};
+use koharu_pipeline::{
+    Committer, Operation, PipelineConfig, RunStatus, Scope, Stage, StageOutput, StopToken,
+};
+use koharu_scene::{Commit, EntityId, LanguageTag, Snapshot};
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -21,7 +23,7 @@ use crate::commands::{
     output,
     preferences::Preferences,
     processing::{JobId, Processing},
-    project::{CurrentProject, Project, ProjectInfo, Typography},
+    project::{CurrentProject, Project, ProjectInfo, TranslationUpdate, Typography},
 };
 
 #[derive(Clone)]
@@ -246,7 +248,7 @@ impl Host for KoharuHost {
                     ),
                     definition::<SetTranslation>(
                         "set_translation",
-                        "Set an element's translation, or pass null to remove it.",
+                        "Set an element's translation, or pass null to remove it. The translation is tagged with its language, which decides how lines break.",
                         metadata(ToolGroup::Text),
                     ),
                     definition::<SetTypography>(
@@ -401,12 +403,28 @@ impl Host for KoharuHost {
             "set_translation" => {
                 let arguments: SetTranslation = arguments(&call)?;
                 let element = entity(&arguments.element)?;
+                let Some(text) = arguments.text else {
+                    return self
+                        .mutate(|project| {
+                            Box::pin(async move {
+                                Ok((
+                                    project.remove_translation(element).await?,
+                                    json!({ "element": element }),
+                                ))
+                            })
+                        })
+                        .await;
+                };
+                let language = translation_language(arguments.language)?;
                 self.mutate(|project| {
                     Box::pin(async move {
-                        Ok((
-                            project.set_translation(element, arguments.text).await?,
-                            json!({ "element": element }),
-                        ))
+                        let result = json!({ "element": element, "language": language.as_str() });
+                        let update = TranslationUpdate {
+                            layer: element,
+                            text,
+                            language: Some(language),
+                        };
+                        Ok((project.set_translations(vec![update]).await?, result))
                     })
                 })
                 .await
@@ -566,6 +584,20 @@ fn arguments<T: for<'de> Deserialize<'de>>(call: &ToolCall) -> Result<T> {
         .with_context(|| format!("invalid arguments for {}", call.name))
 }
 
+/// Agent translations always carry a language so the renderer breaks lines
+/// with that language's rules instead of the English fallback for untagged text.
+fn translation_language(language: Option<String>) -> Result<LanguageTag> {
+    match language.filter(|language| !language.trim().is_empty()) {
+        Some(language) => LanguageTag::new(language.trim())
+            .with_context(|| format!("{language:?} is not a valid BCP 47 language tag")),
+        None => {
+            let pipeline = PipelineConfig::load()?;
+            let target = pipeline.read()?.translation.target_language;
+            Ok(LanguageTag::new(target.tag())?)
+        }
+    }
+}
+
 fn entity(value: &str) -> Result<EntityId> {
     serde_json::from_value(Value::String(value.to_owned()))
         .with_context(|| format!("invalid entity ID {value}"))
@@ -621,6 +653,9 @@ struct SetText {
 struct SetTranslation {
     element: String,
     text: Option<String>,
+    /// BCP 47 tag of the translation's language, such as `id-ID`. Defaults to
+    /// the target language in Koharu's settings.
+    language: Option<String>,
 }
 
 #[derive(Clone, Copy, Deserialize, JsonSchema)]

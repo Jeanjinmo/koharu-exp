@@ -5,11 +5,12 @@ use image::{DynamicImage, ImageFormat, RgbaImage};
 use koharu_desktop::Frame;
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, Authored, Commit, EntityId, EntityOrigin,
-    Geometry as SceneGeometry, Group as SceneGroup, Origin, PageDraft, Point as ScenePoint,
-    Presents, RasterLayer as SceneRasterLayer, RasterLayerKind, Region as SceneRegion,
-    RemovePolicy, Revision, Session, Snapshot, SourceText as SceneSourceText,
-    TextGroup as SceneTextGroup, TextLayout as SceneTextLayout, TextLayoutKind,
-    Translation as SceneTranslation, Typography as SceneTypography, Visibility as SceneVisibility,
+    Geometry as SceneGeometry, Group as SceneGroup, LanguageTag, Origin, PageDraft,
+    Point as ScenePoint, Presents, RasterLayer as SceneRasterLayer, RasterLayerKind,
+    Region as SceneRegion, RemovePolicy, Revision, Session, Snapshot,
+    SourceText as SceneSourceText, TextGroup as SceneTextGroup, TextLayout as SceneTextLayout,
+    TextLayoutKind, Translation as SceneTranslation, Typography as SceneTypography,
+    Visibility as SceneVisibility,
 };
 use serde::Serialize;
 use specta::Type;
@@ -24,6 +25,13 @@ use super::{
 pub(crate) enum RasterStrokeMode {
     Paint,
     Erase,
+}
+
+pub(crate) struct TranslationUpdate {
+    pub(crate) layer: EntityId,
+    pub(crate) text: String,
+    /// Language of `text`; `None` keeps the element's current language tag.
+    pub(crate) language: Option<LanguageTag>,
 }
 
 #[derive(Clone, Debug, Serialize, Type)]
@@ -496,29 +504,58 @@ impl Project {
         self.commit(patch).await
     }
 
-    pub(crate) async fn set_translation(
+    /// Sets every translation in one commit, so one undo step reverts them all.
+    /// All elements are validated before anything is applied.
+    pub(crate) async fn set_translations(
         &mut self,
-        layer: EntityId,
-        text: Option<String>,
+        updates: Vec<TranslationUpdate>,
     ) -> Result<Commit> {
+        if updates.is_empty() {
+            bail!("no translations were given");
+        }
         let snapshot = self.snapshot();
-        let content = Self::text_content(&snapshot, layer)?;
-        let language = snapshot
-            .component::<SceneTranslation>(content)?
-            .and_then(|translation| translation.language);
+        let mut seen = HashSet::new();
+        let updates = updates
+            .into_iter()
+            .map(|update| {
+                if !seen.insert(update.layer) {
+                    bail!("element {} is listed more than once", update.layer);
+                }
+                let content = Self::text_content(&snapshot, update.layer)
+                    .with_context(|| format!("element {} is not a text element", update.layer))?;
+                let language = match update.language {
+                    Some(language) => Some(language),
+                    None => snapshot
+                        .component::<SceneTranslation>(content)?
+                        .and_then(|translation| translation.language),
+                };
+                Ok((update.layer, content, update.text, language))
+            })
+            .collect::<Result<Vec<_>>>()?;
         let patch = snapshot.patch(|edit| {
-            edit.promote_entity_to_user(layer)?;
-            edit.promote_entity_to_user(content)?;
-            match text {
-                Some(text) => edit.set(
+            for (layer, content, text, language) in updates {
+                edit.promote_entity_to_user(layer)?;
+                edit.promote_entity_to_user(content)?;
+                edit.set(
                     content,
                     &SceneTranslation {
                         text: Authored::user(text),
                         language,
                     },
-                ),
-                None => edit.remove::<SceneTranslation>(content),
+                )?;
             }
+            Ok(())
+        })?;
+        self.commit(patch).await
+    }
+
+    pub(crate) async fn remove_translation(&mut self, layer: EntityId) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        let content = Self::text_content(&snapshot, layer)?;
+        let patch = snapshot.patch(|edit| {
+            edit.promote_entity_to_user(layer)?;
+            edit.promote_entity_to_user(content)?;
+            edit.remove::<SceneTranslation>(content)
         })?;
         self.commit(patch).await
     }
@@ -1442,6 +1479,106 @@ mod tests {
                 .label,
             "latest manual"
         );
+    }
+
+    async fn project_with_text(count: usize) -> (Project, EntityId, Vec<EntityId>) {
+        let mut session = Session::memory().await.unwrap();
+        let mut setup = session.snapshot().edit();
+        let page = setup
+            .add_page(PageDraft::new("page", 100.0, 100.0), At::End)
+            .unwrap();
+        let layers = (0..count)
+            .map(|_| {
+                let content = setup.add_text_content(page, At::End).unwrap();
+                setup
+                    .set(
+                        content,
+                        &SceneSourceText {
+                            text: Authored::user("源".to_owned()),
+                            language: None,
+                        },
+                    )
+                    .unwrap();
+                setup
+                    .add_text_layer(
+                        page,
+                        At::End,
+                        content,
+                        &SceneTextLayout {
+                            origin: Origin::User,
+                            kind: TextLayoutKind::Paragraph,
+                            angle_degrees: None,
+                        },
+                    )
+                    .unwrap()
+            })
+            .collect();
+        session.commit(setup.finish().unwrap()).await.unwrap();
+        (Project::new(session, "test".to_owned()), page, layers)
+    }
+
+    fn translation(project: &Project, layer: EntityId) -> Option<SceneTranslation> {
+        let snapshot = project.snapshot();
+        let content = Project::text_content(&snapshot, layer).unwrap();
+        snapshot.component::<SceneTranslation>(content).unwrap()
+    }
+
+    #[tokio::test]
+    async fn translations_are_tagged_or_keep_their_language() {
+        let (mut project, _, layers) = project_with_text(1).await;
+        let indonesian = LanguageTag::new("id-ID").unwrap();
+
+        project
+            .set_translations(vec![TranslationUpdate {
+                layer: layers[0],
+                text: "Tuhan".to_owned(),
+                language: Some(indonesian.clone()),
+            }])
+            .await
+            .unwrap();
+        project
+            .set_translations(vec![TranslationUpdate {
+                layer: layers[0],
+                text: "Sang Tuhan".to_owned(),
+                language: None,
+            }])
+            .await
+            .unwrap();
+
+        let value = translation(&project, layers[0]).unwrap();
+        assert_eq!(value.text.value, "Sang Tuhan");
+        assert_eq!(value.language, Some(indonesian));
+    }
+
+    #[tokio::test]
+    async fn batch_translations_commit_once_or_not_at_all() {
+        let (mut project, page, layers) = project_with_text(2).await;
+        let update = |layer, text: &str| TranslationUpdate {
+            layer,
+            text: text.to_owned(),
+            language: None,
+        };
+
+        let revision = project.revision();
+        let error = project
+            .set_translations(vec![update(layers[0], "one"), update(page, "page")])
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains(&page.to_string()));
+        let error = project
+            .set_translations(vec![update(layers[0], "one"), update(layers[0], "again")])
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("more than once"));
+        assert_eq!(project.revision(), revision);
+        assert!(translation(&project, layers[0]).is_none());
+
+        let commit = project
+            .set_translations(vec![update(layers[0], "one"), update(layers[1], "two")])
+            .await
+            .unwrap();
+        assert_eq!(commit.changes.from, revision);
+        assert_eq!(translation(&project, layers[1]).unwrap().text.value, "two");
     }
 
     #[test]
