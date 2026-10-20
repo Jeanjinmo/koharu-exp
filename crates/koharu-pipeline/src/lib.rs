@@ -8,6 +8,7 @@ mod images;
 mod model_cell;
 mod pipeline;
 mod progress;
+mod reading;
 mod report;
 mod request;
 mod resources;
@@ -23,6 +24,7 @@ pub use config::{
 pub use error::{ErrorKind, PipelineError};
 pub use pipeline::Pipeline;
 pub use progress::{Progress, ProgressSink};
+pub use reading::LayoutBox;
 pub use report::{Committer, Report, RunStatus, StageOutput};
 pub use request::{InpaintingMask, Operation, Request, StopToken};
 pub use resources::{DeviceResources, ResourceSnapshot};

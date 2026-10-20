@@ -39,6 +39,9 @@ struct ElementOutline {
     source: Option<TextOutline>,
     #[serde(skip_serializing_if = "Option::is_none")]
     translation: Option<TextOutline>,
+    /// What the page's reference (a published translation) letters here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reference: Option<TextOutline>,
     #[serde(skip_serializing_if = "Option::is_none")]
     typography: Option<TypographyOutline>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -119,6 +122,10 @@ pub(super) fn page_outline(snapshot: &Snapshot, page: EntityId) -> Result<PageOu
                     translation: content.translation.map(|translation| TextOutline {
                         text: translation.text,
                         language: translation.language,
+                    }),
+                    reference: content.reference.map(|reference| TextOutline {
+                        text: reference.text,
+                        language: Some(reference.language),
                     }),
                     typography: typography.and_then(typography_outline),
                     hidden: !visibility.visible,
@@ -246,7 +253,8 @@ fn is_true(value: &bool) -> bool {
 mod tests {
     use koharu_scene::{
         At, Authored, Geometry as SceneGeometry, LanguageTag, Origin, PageDraft, RasterLayer,
-        RecognizedFrom, Session, SourceText, TextLayout, TextLayoutKind, TextRegion, Translation,
+        RecognizedFrom, ReferenceText, Session, SourceText, TextLayout, TextLayoutKind, TextRegion,
+        Translation,
     };
 
     use super::*;
@@ -286,6 +294,15 @@ mod tests {
                             language: Some(LanguageTag::new("id-ID")?),
                         },
                     )?;
+                    if index == 0 {
+                        edit.set(
+                            content,
+                            &ReferenceText {
+                                text: Authored::user("NEVER MIND THAT, WHERE IS GOD?".to_owned()),
+                                language: LanguageTag::new("en-US")?,
+                            },
+                        )?;
+                    }
                     edit.relate::<RecognizedFrom>(content, region)?;
                     let layer = edit.add_text_layer(
                         page,
@@ -329,6 +346,10 @@ mod tests {
             first.translation.as_ref().unwrap().language.as_deref(),
             Some("id-ID")
         );
+        let reference = first.reference.as_ref().unwrap();
+        assert_eq!(reference.text, "NEVER MIND THAT, WHERE IS GOD?");
+        assert_eq!(reference.language.as_deref(), Some("en-US"));
+        assert!(outline.elements[1].reference.is_none());
         assert_eq!(outline.raster_layers[0].id, cleanup);
 
         let area = element_area(&snapshot, page, elements[0]).unwrap();

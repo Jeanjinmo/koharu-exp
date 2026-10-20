@@ -7,6 +7,7 @@ import {
   FolderOpen,
   HardDrive,
   LoaderCircle,
+  ScanText,
   Settings,
   Trash2,
 } from 'lucide-react'
@@ -264,6 +265,21 @@ export function TitleBar() {
                   })}
                 </MenubarItem>
               ))}
+              <MenubarSeparator />
+              <MenubarItem
+                disabled={!pages.some((candidate) => candidate.reference)}
+                onClick={() =>
+                  void call(
+                    commands.readReferences,
+                    pages
+                      .filter((candidate) => candidate.reference)
+                      .map((candidate) => candidate.id),
+                  ).catch(() => undefined)
+                }
+              >
+                <ScanText />
+                {t('references.readAll')}
+              </MenubarItem>
             </MenubarContent>
           </MenubarMenu>
 

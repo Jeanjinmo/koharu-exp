@@ -189,6 +189,60 @@ impl Component for Translation {
     }
 }
 
+/// The text a page's reference letters for this content, kept when the
+/// reference is in another language than the translation. Translation works
+/// from it, with the source text to check the meaning.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+pub struct ReferenceText {
+    pub text: Authored<String>,
+    pub language: LanguageTag,
+}
+
+impl Revisioned for ReferenceText {
+    fn revision() -> u16 {
+        1
+    }
+}
+
+impl SerializeRevisioned for ReferenceText {
+    fn serialize_revisioned<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> std::result::Result<(), revision::Error> {
+        self.text.serialize_revisioned(writer)?;
+        self.language.serialize_revisioned(writer)
+    }
+}
+
+impl DeserializeRevisioned for ReferenceText {
+    fn deserialize_revisioned<R: std::io::Read>(
+        reader: &mut R,
+    ) -> std::result::Result<Self, revision::Error> {
+        Ok(Self {
+            text: Authored::deserialize_revisioned(reader)?,
+            language: LanguageTag::deserialize_revisioned(reader)?,
+        })
+    }
+}
+
+impl Component for ReferenceText {
+    const KIND: &'static str = "dev.koharu-exp.text.reference";
+
+    fn validate(&self, _context: &ValidationContext<'_>) -> Result<()> {
+        validate_authored_text(&self.text)?;
+        self.language.validate()
+    }
+
+    fn origin(&self) -> Option<&Origin> {
+        Some(&self.text.origin)
+    }
+
+    fn set_origin(&mut self, origin: Origin) -> bool {
+        self.text.origin = origin;
+        true
+    }
+}
+
 fn validate_authored_text(value: &Authored<String>) -> Result<()> {
     if value.value.len() > 16 * 1024 * 1024 || value.value.contains('\0') {
         return Err(Error::invalid("text is too large or contains NUL"));

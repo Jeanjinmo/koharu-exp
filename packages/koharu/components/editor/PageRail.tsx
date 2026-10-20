@@ -9,6 +9,7 @@ import {
   HardDrive,
   LoaderCircle,
   MoreHorizontal,
+  ScanText,
   Search,
   Settings,
   Trash2,
@@ -237,19 +238,20 @@ export function PageRail() {
       .then(() => refresh(projectKey, pagesKey))
       .catch(() => undefined)
 
-  // Removing the reference of one of several selected pages removes it from
-  // every selected page that has one.
-  const removeReference = (page: string) => {
-    const targets =
-      selected.length > 1 && selected.includes(page)
-        ? pages
-            .filter((item) => item.reference && selected.includes(item.id))
-            .map((item) => item.id)
-        : [page]
-    void call(commands.detachReferences, targets)
+  // A reference action on one of several selected pages applies to every
+  // selected page that has a reference.
+  const referenced = (page: string) =>
+    selected.length > 1 && selected.includes(page)
+      ? pages.filter((item) => item.reference && selected.includes(item.id)).map((item) => item.id)
+      : [page]
+
+  const removeReference = (page: string) =>
+    void call(commands.detachReferences, referenced(page))
       .then(() => refresh(projectKey, pagesKey))
       .catch(() => undefined)
-  }
+
+  const readReference = (page: string) =>
+    void call(commands.readReferences, referenced(page)).catch(() => undefined)
 
   const openRename = (page: PageSummary) => {
     setRenaming(page)
@@ -389,6 +391,7 @@ export function PageRail() {
                       onDragEnd={() => setDragged(null)}
                       onRename={() => openRename(page)}
                       onStatus={(status) => setStatus(page.id, status)}
+                      onReadReference={() => readReference(page.id)}
                       onRemoveReference={() => removeReference(page.id)}
                       onDelete={() => deletePage(page.id)}
                       onDrop={() => {
@@ -534,6 +537,7 @@ function PageItem({
   onDragEnd,
   onRename,
   onStatus,
+  onReadReference,
   onRemoveReference,
   onDelete,
   onDrop,
@@ -548,6 +552,7 @@ function PageItem({
   onDragEnd: () => void
   onRename: () => void
   onStatus: (status: PageStatus) => void
+  onReadReference: () => void
   onRemoveReference: () => void
   onDelete: () => void
   onDrop: () => void
@@ -625,6 +630,9 @@ function PageItem({
               {page.reference && (
                 <>
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={onReadReference}>
+                    <ScanText /> {t('references.read')}
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={onRemoveReference}>
                     <BookImage /> {t('references.remove')}
                   </DropdownMenuItem>

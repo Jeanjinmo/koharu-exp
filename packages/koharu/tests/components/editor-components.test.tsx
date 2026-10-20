@@ -78,6 +78,7 @@ const textLayer: Layer = {
     id: 'content',
     source: { text: 'こんにちは', language: 'ja' },
     translation: { text: 'Hello', language: null },
+    reference: null,
     role: null,
     source_region: null,
   },
@@ -740,6 +741,41 @@ describe('greenfield editor', () => {
         }),
       ]),
     )
+  })
+
+  it('shows what the page reference letters for a text, or that nothing came from it yet', async () => {
+    installProject()
+    queryClient.setQueryData<PageSummary[]>(pagesKey, (pages) =>
+      pages?.map((page) => ({
+        ...page,
+        reference: {
+          asset: 'reference',
+          language: 'en-US',
+          placement: { x: 0, y: 0, width: 1, height: 1 },
+        },
+      })),
+    )
+    const view = render(<Inspector />)
+    expect(screen.getByText(/Nothing from the reference yet/)).toBeInTheDocument()
+
+    act(() =>
+      queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({
+        ...page,
+        layers: page.layers.map((layer) =>
+          layer.type === 'text'
+            ? {
+                ...layer,
+                content: {
+                  ...layer.content,
+                  reference: { text: 'HELLO THERE', language: 'en-US' },
+                },
+              }
+            : layer,
+        ),
+      })),
+    )
+    expect(await view.findByText('Reference (en-US)')).toBeInTheDocument()
+    expect(view.getByTestId('reference-element')).toHaveTextContent('HELLO THERE')
   })
 
   it('adjusts brush size from the toolbar popover', async () => {
@@ -1810,6 +1846,8 @@ describe('greenfield editor', () => {
         job: {
           state: 'running',
           id: 'job',
+          kind: 'pipeline',
+          summary: null,
           completed: 1,
           total: 4,
           page: 'page',

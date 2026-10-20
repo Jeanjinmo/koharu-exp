@@ -129,8 +129,9 @@ async fn built_in_component_schema_revisions_are_explicit() {
             schema::<Relation>(),
             schema::<PageStatus>(),
             schema::<PageReference>(),
+            schema::<ReferenceText>(),
         ],
-        [1; 20]
+        [1; 21]
     );
     assert_eq!(schema::<TextLayout>(), 2);
 }
@@ -160,6 +161,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             crate::components::Assets::KIND,
             PageStatus::KIND,
             PageReference::KIND,
+            ReferenceText::KIND,
         ],
         [
             "dev.koharu.project",
@@ -183,6 +185,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             "dev.koharu.assets",
             "dev.koharu-exp.page.status",
             "dev.koharu-exp.page.reference",
+            "dev.koharu-exp.text.reference",
         ]
     );
 }
@@ -257,6 +260,39 @@ async fn page_references_live_on_pages_with_a_valid_placement() {
     let reopened = Session::open(&path).await.unwrap().snapshot();
     assert_eq!(
         reopened.component::<PageReference>(referenced).unwrap(),
+        Some(reference)
+    );
+}
+
+#[tokio::test]
+async fn reference_text_belongs_to_text_content_and_survives_reopening() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("reference-text.khrproj");
+    let reference = ReferenceText {
+        text: Authored::user("WHERE IS SHE?".to_owned()),
+        language: LanguageTag::new("en-US").unwrap(),
+    };
+    let content = {
+        let mut session = Session::create(&path).await.unwrap();
+        let mut edit = session.snapshot().edit();
+        let page = edit.add_page(page(), At::End).unwrap();
+        let content = edit.add_text_content(page, At::End).unwrap();
+        edit.set(content, &reference).unwrap();
+        let snapshot = session
+            .commit(edit.finish().unwrap())
+            .await
+            .unwrap()
+            .snapshot;
+
+        let mut edit = snapshot.edit();
+        edit.set(page, &reference).unwrap();
+        assert!(edit.finish().is_err());
+        content
+    };
+
+    let reopened = Session::open(&path).await.unwrap().snapshot();
+    assert_eq!(
+        reopened.text_content(content).unwrap().reference().unwrap(),
         Some(reference)
     );
 }

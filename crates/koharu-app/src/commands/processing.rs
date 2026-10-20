@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{collections::HashMap, fmt, future::Future, sync::Arc};
 
 use anyhow::{Context as _, Result};
 use koharu_pipeline::{Committer, Progress, RunStatus, StageOutput, StopToken};
@@ -10,7 +10,10 @@ use tauri::{AppHandle, Manager as _, State, ipc::Channel};
 use tauri_runtime_cef::CefRuntime;
 use uuid::Uuid;
 
-use super::{ChannelExt as _, Error, canvas::CanvasChannel, project::CurrentProject};
+use super::{
+    ChannelExt as _, Error, canvas::CanvasChannel, project::CurrentProject,
+    reference::ReferenceReading,
+};
 use koharu_desktop::Desktop;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, Type)]
@@ -39,6 +42,7 @@ impl fmt::Display for JobId {
 #[derive(Clone, Debug, Serialize, Type)]
 pub struct Job {
     pub id: JobId,
+    pub kind: JobKind,
     pub state: JobState,
     #[specta(type = f64)]
     pub completed: usize,
@@ -48,6 +52,23 @@ pub struct Job {
     pub stage: Option<koharu_pipeline::Stage>,
     pub model: Option<String>,
     pub error: Option<String>,
+    /// What the job found, once it has finished.
+    pub summary: Option<JobSummary>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum JobSummary {
+    References(ReferenceReading),
+}
+
+/// What a job does, so its progress can say so between pipeline stages.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum JobKind {
+    Pipeline,
+    /// Reading the text of references into their pages.
+    References,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Type)]
@@ -71,56 +92,49 @@ pub(crate) struct JobChannel {
     pub(crate) channel: Mutex<Option<Channel<Job>>>,
 }
 
-#[tauri::command]
-#[specta::specta]
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn process(
+/// The running job, as its work sees it.
+#[derive(Clone)]
+pub(crate) struct JobContext {
     handle: AppHandle<CefRuntime>,
-    scope: koharu_pipeline::Scope,
-    operation: koharu_pipeline::Operation,
-    project: State<'_, CurrentProject>,
-    processing: State<'_, Processing>,
-    job_channel: State<'_, JobChannel>,
-) -> std::result::Result<JobId, Error> {
-    let snapshot = project
-        .project
-        .lock()
-        .await
-        .as_ref()
-        .context("no project is open")?
-        .snapshot();
-    let id = JobId::new();
-    let stop = StopToken::default();
-    {
-        let mut stops = processing.stops.lock();
-        if !stops.is_empty() {
-            return Err(anyhow::anyhow!("another process is already running").into());
-        }
-        stops.insert(id, stop.clone());
-    }
-    let job = Job {
-        id,
-        state: JobState::Running,
-        completed: 0,
-        total: 0,
-        page: None,
-        stage: None,
-        model: None,
-        error: None,
-    };
-    processing.jobs.lock().insert(id, job.clone());
-    job_channel.channel.publish(job);
+    id: JobId,
+    pub(crate) stop: StopToken,
+}
 
-    let pipeline = handle.state::<koharu_pipeline::Pipeline>().inner().clone();
-    let task_handle = handle.clone();
-    let inpainting_mask = processing.inpainting_mask.lock().take();
-    drop(tokio::spawn(async move {
+impl JobContext {
+    pub(crate) fn handle(&self) -> &AppHandle<CefRuntime> {
+        &self.handle
+    }
+
+    /// Updates the job's progress and tells the UI.
+    pub(crate) fn report(&self, update: impl FnOnce(&mut Job)) {
+        let job = {
+            let processing = self.handle.state::<Processing>();
+            let mut jobs = processing.jobs.lock();
+            jobs.get_mut(&self.id).map(|job| {
+                update(job);
+                job.clone()
+            })
+        };
+        if let Some(job) = job {
+            self.handle.state::<JobChannel>().channel.publish(job);
+        }
+    }
+
+    /// Runs pipeline stages as part of this job, committing what each stage
+    /// produces as it finishes.
+    pub(crate) async fn run_pipeline(
+        &self,
+        snapshot: Snapshot,
+        scope: koharu_pipeline::Scope,
+        operation: koharu_pipeline::Operation,
+        inpainting_mask: Option<koharu_pipeline::InpaintingMask>,
+    ) -> Result<RunStatus> {
         let progress = Arc::new(Mutex::new((0_usize, 0_usize)));
-        let progress_handle = task_handle.clone();
+        let context = self.clone();
         let mut request = koharu_pipeline::Request {
             operation,
             scope,
-            stop: stop.clone(),
+            stop: self.stop.clone(),
             progress: None,
             inpainting_mask,
         };
@@ -187,95 +201,171 @@ pub(crate) async fn process(
                 }
             };
             if let Some((completed, total, page, stage, model)) = update {
-                let job = {
-                    let processing = progress_handle.state::<Processing>();
-                    let mut jobs = processing.jobs.lock();
-                    jobs.get_mut(&id).map(|job| {
-                        job.completed = completed;
-                        job.total = total;
-                        job.page = page;
-                        job.stage = stage;
-                        job.model = model;
-                        job.clone()
-                    })
-                };
-                if let Some(job) = job {
-                    progress_handle.state::<JobChannel>().channel.publish(job);
-                }
+                context.report(|job| {
+                    job.completed = completed;
+                    job.total = total;
+                    job.page = page;
+                    job.stage = stage;
+                    job.model = model;
+                });
             }
         }));
 
-        struct PipelineCommitter {
-            handle: AppHandle<CefRuntime>,
-        }
-
-        #[async_trait::async_trait]
-        impl Committer for PipelineCommitter {
-            async fn commit(&mut self, output: StageOutput) -> Result<Snapshot> {
-                let (commit, page) = {
-                    let projects = self.handle.state::<CurrentProject>();
-                    let mut projects = projects.project.lock().await;
-                    let project = projects.as_mut().context("no project is open")?;
-                    let Some(commit) = project.commit_rebased(output.patch).await? else {
-                        return Ok(project.snapshot());
-                    };
-                    project.record_commit(&commit);
-                    let page = project.active_page();
-                    (commit, page)
-                };
-                let snapshot = commit.snapshot.clone();
-                let desktop = self.handle.state::<Desktop>();
-                desktop.synchronize(&commit.snapshot, page, &commit).await?;
-                let canvas = desktop.canvas_state();
-                self.handle.state::<CanvasChannel>().channel.publish(canvas);
-                Ok(snapshot)
-            }
-        }
-
         let mut committer = PipelineCommitter {
-            handle: task_handle.clone(),
+            handle: self.handle.clone(),
         };
-        let result = pipeline.execute(snapshot, request, &mut committer).await;
-        let (stopped, error) = match result {
-            Ok(report) => (report.status == RunStatus::Stopped, None),
-            Err(error) => {
-                tracing::error!(stage = ?error.stage, %error, "processing failed");
-                (false, Some(format!("{error:#}")))
-            }
-        };
+        let result = self
+            .handle
+            .state::<koharu_pipeline::Pipeline>()
+            .execute(snapshot, request, &mut committer)
+            .await;
         tracing::info!(
             target: "koharu_metrics",
             metric = "pipeline_result",
-            outcome = if stopped {
-                "stopped"
-            } else if error.is_some() {
-                "failed"
-            } else {
-                "completed"
+            outcome = match &result {
+                Ok(report) if report.status == RunStatus::Stopped => "stopped",
+                Ok(_) => "completed",
+                Err(_) => "failed",
             },
         );
-        task_handle.state::<Processing>().stops.lock().remove(&id);
-        let job = task_handle
+        match result {
+            Ok(report) => Ok(report.status),
+            Err(error) => {
+                tracing::error!(stage = ?error.stage, %error, "processing failed");
+                Err(anyhow::anyhow!(error))
+            }
+        }
+    }
+}
+
+struct PipelineCommitter {
+    handle: AppHandle<CefRuntime>,
+}
+
+#[async_trait::async_trait]
+impl Committer for PipelineCommitter {
+    async fn commit(&mut self, output: StageOutput) -> Result<Snapshot> {
+        let (commit, page) = {
+            let projects = self.handle.state::<CurrentProject>();
+            let mut projects = projects.project.lock().await;
+            let project = projects.as_mut().context("no project is open")?;
+            let Some(commit) = project.commit_rebased(output.patch).await? else {
+                return Ok(project.snapshot());
+            };
+            project.record_commit(&commit);
+            let page = project.active_page();
+            (commit, page)
+        };
+        let snapshot = commit.snapshot.clone();
+        let desktop = self.handle.state::<Desktop>();
+        desktop.synchronize(&commit.snapshot, page, &commit).await?;
+        let canvas = desktop.canvas_state();
+        self.handle.state::<CanvasChannel>().channel.publish(canvas);
+        Ok(snapshot)
+    }
+}
+
+/// Starts `work` as the one running job: only one job runs at a time, and
+/// its progress, end, and failure reach the UI.
+pub(crate) fn start_job<Work, Done>(
+    handle: &AppHandle<CefRuntime>,
+    kind: JobKind,
+    work: Work,
+) -> Result<JobId>
+where
+    Work: FnOnce(JobContext) -> Done + Send + 'static,
+    Done: Future<Output = Result<RunStatus>> + Send + 'static,
+{
+    let id = JobId::new();
+    let stop = StopToken::default();
+    {
+        let processing = handle.state::<Processing>();
+        let mut stops = processing.stops.lock();
+        if !stops.is_empty() {
+            anyhow::bail!("another process is already running");
+        }
+        stops.insert(id, stop.clone());
+    }
+    let job = Job {
+        id,
+        kind,
+        state: JobState::Running,
+        completed: 0,
+        total: 0,
+        page: None,
+        stage: None,
+        model: None,
+        error: None,
+        summary: None,
+    };
+    handle
+        .state::<Processing>()
+        .jobs
+        .lock()
+        .insert(id, job.clone());
+    handle.state::<JobChannel>().channel.publish(job);
+
+    let context = JobContext {
+        handle: handle.clone(),
+        id,
+        stop,
+    };
+    drop(tokio::spawn(async move {
+        let handle = context.handle.clone();
+        let result = work(context).await;
+        handle.state::<Processing>().stops.lock().remove(&id);
+        let job = handle
             .state::<Processing>()
             .jobs
             .lock()
             .remove(&id)
             .map(|mut job| {
-                job.state = if stopped {
-                    JobState::Stopped
-                } else if error.is_some() {
-                    JobState::Failed
-                } else {
-                    JobState::Finished
-                };
-                job.error = error;
+                match result {
+                    Ok(RunStatus::Completed) => job.state = JobState::Finished,
+                    Ok(RunStatus::Stopped) => job.state = JobState::Stopped,
+                    Err(error) => {
+                        job.state = JobState::Failed;
+                        job.error = Some(format!("{error:#}"));
+                    }
+                }
                 job
             });
         if let Some(job) = job {
-            task_handle.state::<JobChannel>().channel.publish(job);
+            handle.state::<JobChannel>().channel.publish(job);
         }
     }));
     Ok(id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn process(
+    handle: AppHandle<CefRuntime>,
+    scope: koharu_pipeline::Scope,
+    operation: koharu_pipeline::Operation,
+    project: State<'_, CurrentProject>,
+) -> std::result::Result<JobId, Error> {
+    let snapshot = project
+        .project
+        .lock()
+        .await
+        .as_ref()
+        .context("no project is open")?
+        .snapshot();
+    Ok(start_job(
+        &handle,
+        JobKind::Pipeline,
+        move |job| async move {
+            let inpainting_mask = job
+                .handle
+                .state::<Processing>()
+                .inpainting_mask
+                .lock()
+                .take();
+            job.run_pipeline(snapshot, scope, operation, inpainting_mask)
+                .await
+        },
+    )?)
 }
 
 #[tracing::instrument(

@@ -131,7 +131,9 @@ function JobItem({ job }: { job: Job }) {
           <span className='block truncate text-[12px] font-medium capitalize'>
             {job.stage
               ? t(`phase.${job.stage}`, { defaultValue: job.stage })
-              : t('activity.processing')}
+              : job.kind === 'references'
+                ? t('activity.readingReferences')
+                : t('activity.processing')}
           </span>
         </div>
         <span className='pt-0.5 text-right text-[10px] tabular-nums'>

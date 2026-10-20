@@ -32,6 +32,20 @@ impl Processor {
     }
 }
 
+impl Processor {
+    /// Reads the text of each image, in order, loading the model if needed.
+    pub(super) async fn read(&self, images: Vec<DynamicImage>) -> Result<Vec<String>> {
+        self.load().await?;
+        self.model
+            .lock()
+            .await
+            .as_ref()
+            .ok_or_else(|| anyhow!("OCR model is not loaded"))?
+            .read(images)
+            .await
+    }
+}
+
 #[async_trait]
 impl StageProcessor for Processor {
     fn model(&self) -> &'static str {
@@ -89,6 +103,26 @@ impl Model {
         }
     }
 
+    async fn read(&self, images: Vec<DynamicImage>) -> Result<Vec<String>> {
+        match self {
+            Self::Manga(model) => {
+                infer_text(model.clone(), images, |model, image| model.inference(image)).await
+            }
+            Self::Baberu(model) => {
+                infer_text(model.clone(), images, |model, image| model.inference(image)).await
+            }
+            Self::Hayai(model) => {
+                infer_text(model.clone(), images, |model, image| model.inference(image)).await
+            }
+            Self::Paddle(model) => {
+                infer_text(model.clone(), images, |model, image| {
+                    Ok(model.inference(image, PaddleOCRVLTask::Ocr)?.text)
+                })
+                .await
+            }
+        }
+    }
+
     async fn run(&self, input: StageInput) -> Result<koharu_scene::Patch> {
         let model_name = match self {
             Self::Manga(_) => "manga-ocr",
@@ -98,6 +132,7 @@ impl Model {
         };
         let page = input.page;
         let mut targets = Vec::new();
+        let mut images = Vec::new();
         let source = input
             .images
             .get(&input.scene, page, "source")
@@ -135,37 +170,23 @@ impl Model {
                     region,
                     geometry: geometry.clone(),
                     previous,
-                    image: crop.clone(),
                 });
+                images.push(crop.clone());
             }
         }
 
-        let results = match self {
-            Self::Manga(model) => {
-                infer_text(model.clone(), targets, |model, image| {
-                    model.inference(image)
-                })
-                .await?
-            }
-            Self::Baberu(model) => {
-                infer_text(model.clone(), targets, |model, image| {
-                    model.inference(image)
-                })
-                .await?
-            }
-            Self::Hayai(model) => {
-                infer_text(model.clone(), targets, |model, image| {
-                    model.inference(image)
-                })
-                .await?
-            }
-            Self::Paddle(model) => {
-                infer_text(model.clone(), targets, |model, image| {
-                    Ok(model.inference(image, PaddleOCRVLTask::Ocr)?.text)
-                })
-                .await?
-            }
-        };
+        let texts = self.read(images).await?;
+        let results = targets
+            .into_iter()
+            .zip(texts)
+            .map(|(target, text)| OcrResult {
+                content: target.content,
+                region: target.region,
+                geometry: target.geometry,
+                previous: target.previous,
+                text,
+            })
+            .collect::<Vec<_>>();
 
         let generation = generation(PRODUCER, model_name)?;
         let mut edit = input.scene.edit_as(generation.clone());
@@ -212,7 +233,6 @@ struct OcrTarget {
     region: EntityId,
     geometry: Geometry,
     previous: Option<SourceText>,
-    image: DynamicImage,
 }
 
 struct OcrResult {
@@ -225,24 +245,16 @@ struct OcrResult {
 
 async fn infer_text<M: Send + 'static>(
     model: Arc<Mutex<M>>,
-    targets: Vec<OcrTarget>,
+    images: Vec<DynamicImage>,
     inference: impl Fn(&M, &DynamicImage) -> Result<String> + Send + Sync + 'static,
-) -> Result<Vec<OcrResult>> {
+) -> Result<Vec<String>> {
     tokio_rayon::spawn(move || {
         let model = model
             .lock()
             .map_err(|_| anyhow!("OCR model lock is poisoned"))?;
-        targets
-            .into_iter()
-            .map(|target| {
-                Ok(OcrResult {
-                    content: target.content,
-                    region: target.region,
-                    geometry: target.geometry,
-                    previous: target.previous,
-                    text: normalize_ocr_text(inference(&model, &target.image)?),
-                })
-            })
+        images
+            .iter()
+            .map(|image| Ok(normalize_ocr_text(inference(&model, image)?)))
             .collect()
     })
     .await

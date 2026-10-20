@@ -5,6 +5,10 @@
 //! as the page's `PageReference::ASSET_ROLE` asset, which neither rendering
 //! nor export reads.
 
+mod extract;
+
+pub use extract::ReferenceReading;
+
 use std::{io::Cursor, sync::Arc};
 
 use anyhow::{Context as _, Result};
@@ -13,11 +17,13 @@ use image::{
     codecs::jpeg::JpegEncoder, imageops::FilterType,
 };
 use koharu_desktop::Desktop;
-use koharu_scene::{AssetInput, AssetMetadata, EntityId, LanguageTag, ReferencePlacement};
+use koharu_scene::{
+    AssetInput, AssetMetadata, EntityId, LanguageTag, PageReference, ReferencePlacement,
+};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::{State, WebviewWindow};
+use tauri::{AppHandle, State, WebviewWindow};
 use tauri_runtime_cef::CefRuntime;
 
 use super::{
@@ -25,7 +31,7 @@ use super::{
     canvas::CanvasChannel,
     import::{self, PageImportSource},
     output::{THUMBNAIL_EDGE, ThumbnailBytes},
-    processing::Processing,
+    processing::{JobId, JobKind, Processing, start_job},
     project::CurrentProject,
 };
 
@@ -225,6 +231,36 @@ pub(crate) async fn set_reference_placement(
     desktop.synchronize(&commit.snapshot, page, &commit).await?;
     canvas_channel.channel.publish(desktop.canvas_state());
     Ok(())
+}
+
+/// Reads the text of the references of `pages` into their text elements,
+/// as a job. Pages whose own text has not been detected and read yet go
+/// through Detection and OCR first.
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "references_read",
+    skip_all,
+    fields(origin = "user", page_count = pages.len()),
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn read_references(
+    pages: Vec<EntityId>,
+    handle: AppHandle<CefRuntime>,
+    project: State<'_, CurrentProject>,
+) -> std::result::Result<JobId, Error> {
+    {
+        let project = project.project.lock().await;
+        let snapshot = project.as_ref().context("no project is open")?.snapshot();
+        for page in &pages {
+            snapshot
+                .component::<PageReference>(*page)?
+                .with_context(|| format!("page {page} has no reference"))?;
+        }
+    }
+    Ok(start_job(&handle, JobKind::References, move |job| {
+        extract::read_references(job, pages)
+    })?)
 }
 
 /// Pipeline stages read page assets, so changing them mid-run would make the

@@ -60,7 +60,7 @@ impl AcceleratorPermit {
 }
 
 fn unload_other_models(requested: Stage, stages: &Stages) -> bool {
-    let mut unloaded = false;
+    let mut unloaded = stages.unload_reader();
     for stage in Stage::ALL {
         if stage != requested && stages.unload(stage) {
             unloaded = true;

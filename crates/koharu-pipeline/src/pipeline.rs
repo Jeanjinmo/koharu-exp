@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use arc_swap::ArcSwap;
+use image::DynamicImage;
 use koharu_config::Config;
 use koharu_scene::Snapshot;
 
 use crate::{
-    Committer, PipelineConfig, PipelineError, Report, Request, ResourceSnapshot,
+    Committer, LayoutBox, PipelineConfig, PipelineError, Report, Request, ResourceSnapshot,
     execution::Execution, resources::ResourceMonitor, stage_runner::StageRunner,
 };
 
@@ -70,6 +71,21 @@ impl Pipeline {
     pub fn subscribe_resources(&self) -> tokio::sync::watch::Receiver<ResourceSnapshot> {
         self.resources.start();
         self.resources.subscribe()
+    }
+
+    /// Finds text and speech bubbles in an image outside the project, such
+    /// as a reference. It waits for a running pipeline to finish first.
+    pub async fn detect_layout(&self, image: Arc<DynamicImage>) -> Result<Vec<LayoutBox>> {
+        let _execution = self.execution.lock().await;
+        self.current.load_full().detect_layout(image).await
+    }
+
+    /// Reads the text of each image with PaddleOCR-VL, which reads the
+    /// languages translated editions are lettered in, whichever OCR model
+    /// pages use. It waits for a running pipeline to finish first.
+    pub async fn read_text(&self, images: Vec<DynamicImage>) -> Result<Vec<String>> {
+        let _execution = self.execution.lock().await;
+        self.current.load_full().read_text(images).await
     }
 
     #[tracing::instrument(skip_all)]

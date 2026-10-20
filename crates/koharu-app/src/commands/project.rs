@@ -140,6 +140,9 @@ pub struct TextContent {
     pub id: EntityId,
     pub source: Option<SourceText>,
     pub translation: Option<Translation>,
+    /// What the page's reference letters here, when it is in another
+    /// language than the translation or was read from the reference.
+    pub reference: Option<ReferenceText>,
     pub role: Option<String>,
     pub source_region: Option<EntityId>,
 }
@@ -174,6 +177,12 @@ pub struct SourceText {
 pub struct Translation {
     pub text: String,
     pub language: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Type)]
+pub struct ReferenceText {
+    pub text: String,
+    pub language: String,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, Serialize, Type)]
@@ -1238,6 +1247,10 @@ impl Project {
                 text: translation.text.value,
                 language: translation.language.map(|language| language.to_string()),
             });
+            let reference = content.reference()?.map(|reference| ReferenceText {
+                text: reference.text.value,
+                language: reference.language.to_string(),
+            });
             let role = content.role()?.map(|role| role.role);
             let source_region = content.source_region()?.map(|region| region.id());
             let automatic_region = text_layer.automatic_target()?.map(|region| region.id());
@@ -1254,6 +1267,7 @@ impl Project {
                     id: content.id(),
                     source,
                     translation,
+                    reference,
                     role,
                     source_region,
                 }),

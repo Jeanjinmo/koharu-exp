@@ -4,10 +4,11 @@ use std::{
 };
 
 use anyhow::Result;
+use image::DynamicImage;
 use koharu_scene::{EntityId, Patch};
 
 use crate::{
-    ErrorKind, PipelineConfig, PipelineError, Progress, ProgressSink, Stage, StopToken,
+    ErrorKind, LayoutBox, PipelineConfig, PipelineError, Progress, ProgressSink, Stage, StopToken,
     accelerator::AcceleratorGate,
     progress,
     resources::ResourceMonitor,
@@ -138,6 +139,16 @@ impl StageRunner {
                 kind: ErrorKind::Processing,
                 error,
             })
+    }
+
+    pub(crate) async fn detect_layout(&self, image: Arc<DynamicImage>) -> Result<Vec<LayoutBox>> {
+        let _permit = self.accelerator.acquire().await;
+        self.stages.detect_layout(image).await
+    }
+
+    pub(crate) async fn read_text(&self, images: Vec<DynamicImage>) -> Result<Vec<String>> {
+        let _permit = self.accelerator.acquire().await;
+        self.stages.read_text(images).await
     }
 
     fn stage_error(&self, stage: Stage, model: &str, failure: AttemptFailure) -> PipelineError {

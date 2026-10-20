@@ -35,7 +35,15 @@ import {
   isTextLayer,
   layerChildren,
 } from '@/lib/document'
-import { pageKey, projectKey, queryClient, refresh, useFonts, usePage } from '@/lib/queries'
+import {
+  pageKey,
+  projectKey,
+  queryClient,
+  refresh,
+  useFonts,
+  usePage,
+  usePages,
+} from '@/lib/queries'
 import { useKoharuStore } from '@/lib/store'
 import { previewCanvasOpacity } from '@koharu/bridge/canvas'
 import {
@@ -887,6 +895,7 @@ function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void 
               }
             />
           </InspectorField>
+          <ReferenceField layer={layer} />
           <InspectorField label={t('inspector.translation')}>
             <CommitTextarea
               data-testid={`edit-translation-${layer.id}`}
@@ -904,6 +913,38 @@ function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void 
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * What the page's reference letters for this text. It is read from the
+ * reference, so it is shown but not edited here.
+ */
+function ReferenceField({ layer }: { layer: Extract<Layer, { type: 'text' }> }) {
+  const { t } = useTranslation()
+  const active = usePage().data?.id
+  const referenced = Boolean(usePages().data?.find((page) => page.id === active)?.reference)
+  const reference = layer.content.reference
+  if (!reference && !referenced) return null
+  return (
+    <InspectorField
+      label={
+        reference
+          ? t('inspector.referenceIn', { language: reference.language })
+          : t('inspector.reference')
+      }
+    >
+      {reference ? (
+        <p
+          data-testid={`reference-${layer.id}`}
+          className='max-h-16 min-w-0 overflow-y-auto rounded-md bg-foreground/[0.045] px-1.5 py-1 text-[12px] leading-4 break-words whitespace-pre-wrap text-foreground/85'
+        >
+          {reference.text}
+        </p>
+      ) : (
+        <p className='text-[10px] text-muted-foreground'>{t('inspector.noReferenceText')}</p>
+      )}
+    </InspectorField>
   )
 }
 

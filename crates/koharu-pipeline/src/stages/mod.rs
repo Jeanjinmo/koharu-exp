@@ -7,12 +7,13 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use anyhow::Result;
 use async_trait::async_trait;
+use image::DynamicImage;
 use koharu_scene::{Edit, EntityId, Generation, Patch, ProducerId, Snapshot};
 
 pub use detection::KoharuLayoutRFDetrSeg2XLConfig;
 pub use inpainting::{Flux2KleinConfig, RoremMixedConfig};
 
-use crate::{Bounds, ImageCache, InpaintingMask, PipelineConfig, Stage};
+use crate::{Bounds, ImageCache, InpaintingMask, LayoutBox, OcrModel, PipelineConfig, Stage};
 
 #[derive(Clone)]
 pub(crate) struct StageInput {
@@ -74,6 +75,9 @@ pub(crate) struct Stages {
     ocr: ocr::Processor,
     translation: translation::Processor,
     inpainting: inpainting::Processor,
+    /// PaddleOCR-VL for reading images outside the project when pages use
+    /// another OCR model, which reads Japanese only.
+    reader: Option<ocr::Processor>,
 }
 
 impl Stages {
@@ -87,6 +91,8 @@ impl Stages {
             ocr: ocr::Processor::new(config.ocr.clone(), device.clone()),
             translation: translation::Processor::new(config.translation.clone(), translator),
             inpainting: inpainting::Processor::new(config.inpainting()?, device.clone())?,
+            reader: (config.ocr != OcrModel::PaddleOcrVl1_6)
+                .then(|| ocr::Processor::new(OcrModel::PaddleOcrVl1_6, device.clone())),
         })
     }
 
@@ -117,6 +123,19 @@ impl Stages {
 
     pub(crate) fn unload(&self, stage: Stage) -> bool {
         self.processor(stage).unload()
+    }
+
+    pub(crate) async fn detect_layout(&self, image: Arc<DynamicImage>) -> Result<Vec<LayoutBox>> {
+        self.detection.layout(image).await
+    }
+
+    pub(crate) async fn read_text(&self, images: Vec<DynamicImage>) -> Result<Vec<String>> {
+        self.reader.as_ref().unwrap_or(&self.ocr).read(images).await
+    }
+
+    /// Unloads the separate reader, if pages use another OCR model.
+    pub(crate) fn unload_reader(&self) -> bool {
+        self.reader.as_ref().is_some_and(StageProcessor::unload)
     }
 }
 

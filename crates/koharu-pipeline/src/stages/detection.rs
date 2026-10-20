@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::{StageInput, StageProcessor, finish, generation};
-use crate::{DetectionModel, ModelCell};
+use crate::{DetectionModel, LayoutBox, ModelCell};
 
 const MODEL_ID: &str = "mayocream/koharu-layout-rfdetr-seg-2xl-1152";
 const MODEL_NAME: &str = "koharu-layout-rfdetr-seg-2xl";
@@ -90,6 +90,32 @@ impl Processor {
             device,
             model: ModelCell::new(),
         }
+    }
+}
+
+impl Processor {
+    /// Finds layout areas in an image that is not a page, loading the model
+    /// if needed. Overlapping areas of one label are reduced as for pages.
+    pub(super) async fn layout(&self, image: Arc<DynamicImage>) -> Result<Vec<LayoutBox>> {
+        self.load().await?;
+        let mut detections = self
+            .model
+            .lock()
+            .await
+            .as_ref()
+            .ok_or_else(|| anyhow!("detection model is not loaded"))?
+            .detect(image)
+            .await?
+            .detections;
+        non_maximum_suppression(&mut detections, 0.5);
+        Ok(detections
+            .into_iter()
+            .map(|detection| LayoutBox {
+                label: detection.label,
+                score: detection.score,
+                bounds: detection.bbox,
+            })
+            .collect())
     }
 }
 

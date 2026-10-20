@@ -5,6 +5,8 @@ use indoc::indoc;
 use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_json::{Value, json};
 
+#[cfg(test)]
+use crate::SegmentReference;
 use crate::{Language, TranslationContext, TranslationRequest};
 
 pub(crate) fn prompts(request: &TranslationRequest) -> anyhow::Result<(String, String)> {
@@ -16,7 +18,17 @@ pub(crate) fn prompts(request: &TranslationRequest) -> anyhow::Result<(String, S
             .segments
             .iter()
             .enumerate()
-            .map(|(id, text)| TranslationInputSegment { id, text })
+            .map(|(id, text)| TranslationInputSegment {
+                id,
+                text,
+                reference: request
+                    .references
+                    .get(&id)
+                    .map(|reference| TranslationInputReference {
+                        language: &reference.language,
+                        text: &reference.text,
+                    }),
+            })
             .collect(),
     };
     let user = serde_json::to_string(&input).context("failed to serialize translation input")?;
@@ -150,6 +162,22 @@ fn translation_system_prompt(request: &TranslationRequest) -> String {
         "}.trim_end());
     }
 
+    if !request.references.is_empty() {
+        prompt.push_str("\n\n");
+        prompt.push_str(
+            format!(
+                indoc! {"
+                Reference requirements:
+                - Some segments include a `reference`: what a published translation of this work says in the same place, in the language it names.
+                - Base those translations on the reference's meaning, names, and terminology; use the segment `text` only to confirm the meaning and to correct obvious reference errors.
+                - Still write natural {target} that fits the speech bubble; a reference in another language is never copied as it is.
+            "},
+                target = request.target_language,
+            )
+            .trim_end(),
+        );
+    }
+
     if request.image.is_some() {
         prompt.push_str("\n\n");
         prompt.push_str(indoc! {"
@@ -182,6 +210,14 @@ struct TranslationInput<'a> {
 #[derive(Serialize)]
 struct TranslationInputSegment<'a> {
     id: usize,
+    text: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reference: Option<TranslationInputReference<'a>>,
+}
+
+#[derive(Serialize)]
+struct TranslationInputReference<'a> {
+    language: &'a str,
     text: &'a str,
 }
 
@@ -366,6 +402,29 @@ mod tests {
         let prompt = translation_system_prompt(&request);
         assert!(prompt.contains("dialogue continuity"));
         assert!(prompt.contains("Do not translate or return the context"));
+    }
+
+    #[test]
+    fn references_accompany_their_segments_and_lead_the_translation() {
+        let request = TranslationRequest::new(["どこ?", "待って"], Language::Indonesian)
+            .with_references([(
+                1,
+                SegmentReference {
+                    text: "WAIT!".to_owned(),
+                    language: "English".to_owned(),
+                },
+            )]);
+        let (system, user) = prompts(&request).unwrap();
+        let input: serde_json::Value = serde_json::from_str(&user).unwrap();
+        assert!(input["segments"][0].get("reference").is_none());
+        assert_eq!(input["segments"][1]["reference"]["text"], "WAIT!");
+        assert_eq!(input["segments"][1]["reference"]["language"], "English");
+        assert!(system.contains("Base those translations on the reference"));
+        assert!(system.contains("natural Indonesian"));
+        assert!(
+            !translation_system_prompt(&TranslationRequest::new(["x"], Language::English))
+                .contains("Reference requirements")
+        );
     }
 
     #[test]

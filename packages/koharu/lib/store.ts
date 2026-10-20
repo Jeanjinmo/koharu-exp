@@ -20,6 +20,8 @@ import type {
 } from '@koharu/bridge/protocol'
 import { toast } from '@koharu/ui/components/toast'
 
+import i18next from './i18n'
+
 export type CanvasTool = 'select' | 'text' | 'draw' | 'eraser' | 'color_picker' | 'remove' | 'pan'
 export const MIN_BRUSH_DIAMETER = 1
 export const MAX_BRUSH_DIAMETER = 128
@@ -283,6 +285,19 @@ export function receiveCanvas(canvas: CanvasState): void {
 
 export function receiveJob(job: Job): void {
   useKoharuStore.setState((state) => ({ jobs: { ...state.jobs, [job.id]: job } }))
+  const summary = job.state === 'finished' ? job.summary : null
+  if (summary?.kind === 'references') {
+    const read = i18next.t('references.readCount', { count: summary.read })
+    const unmatched =
+      summary.unmatched > 0
+        ? i18next.t('references.unmatchedCount', { count: summary.unmatched })
+        : ''
+    toast.add({
+      type: 'success',
+      title: i18next.t('references.readTitle'),
+      description: [read, unmatched].filter(Boolean).join(' '),
+    })
+  }
 }
 
 export function receiveDownload(download: Download): void {

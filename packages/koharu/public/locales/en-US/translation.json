@@ -15,6 +15,7 @@
     "pageLabel": "Page {{number}}: {{label}}",
     "processing": "Processing",
     "processingFailed": "Processing failed.",
+    "readingReferences": "Reading references",
     "stop": "Stop",
     "title": "Activity"
   },
@@ -222,8 +223,11 @@
     "fontWeight": "Font weight",
     "horizontal": "Horizontal",
     "increaseBorderWidth": "Increase border width",
+    "noReferenceText": "Nothing from the reference yet. Extract text from the reference, or align it first if the bubbles are far off.",
     "opacity": "Opacity",
     "placement": "Placement",
+    "reference": "Reference",
+    "referenceIn": "Reference ({{language}})",
     "resetAutoFit": "Reset to auto fit",
     "selectPage": "Select a page to inspect its layers.",
     "size": "Size",
@@ -399,7 +403,12 @@
     "pageLabel": "{{number}}. {{label}}",
     "pairAgain": "Pair again",
     "pairs": "Pages and their references",
+    "read": "Extract text from reference",
+    "readAll": "Extract text from references",
+    "readCount_one": "1 text area got text from its reference.",
+    "readCount_other": "{{count}} text areas got text from their reference.",
     "reading": "Reading references…",
+    "readTitle": "Extracted text from references",
     "remove": "Remove reference",
     "replaces": "Replaces the current reference",
     "restore": "Pair this reference again",
@@ -411,7 +420,9 @@
     "summary_other": "{{count}} of {{pages}} pages get a reference",
     "title": "Import references",
     "trimMargins": "Trim margins",
-    "trimMarginsHint": "Removes plain borders around each image, such as PDF page margins."
+    "trimMarginsHint": "Removes plain borders around each image, such as PDF page margins.",
+    "unmatchedCount_one": "1 found no match; it shows that in the Inspector.",
+    "unmatchedCount_other": "{{count}} found no match; they show that in the Inspector."
   },
   "resources": {
     "cpu": "CPU",

@@ -2,8 +2,8 @@
 
 use crate::{
     At, DetectionAnalysis, Edit, EntityId, Geometry, Group, OcrAnalysis, Origin, PageRef, Presents,
-    Region, RegionSpec, Result, Snapshot, SourceText, TextContent, TextGroup, TextLayout, TextRole,
-    Translation, Typography, Visibility,
+    ReferenceText, Region, RegionSpec, Result, Snapshot, SourceText, TextContent, TextGroup,
+    TextLayout, TextRole, Translation, Typography, Visibility,
 };
 
 #[derive(Copy, Clone)]
@@ -133,6 +133,10 @@ impl<'a> TextContentRef<'a> {
     }
 
     pub fn translation(self) -> Result<Option<Translation>> {
+        self.snapshot.component(self.id)
+    }
+
+    pub fn reference(self) -> Result<Option<ReferenceText>> {
         self.snapshot.component(self.id)
     }
 

@@ -1,4 +1,4 @@
-use std::{io::Cursor, sync::Arc};
+use std::{collections::BTreeMap, io::Cursor, sync::Arc};
 
 use anyhow::Context;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -17,7 +17,19 @@ pub struct TranslationRequest {
     pub target_language: Language,
     pub instructions: Option<String>,
     pub context: Vec<TranslationContext>,
+    /// What a published translation of the work says for some segments, by
+    /// segment index.
+    pub references: BTreeMap<usize, SegmentReference>,
     pub image: Option<Arc<DynamicImage>>,
+}
+
+/// A segment's text in a published translation of the work, which
+/// translation works from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SegmentReference {
+    pub text: String,
+    /// The language of `text`, as a name or a language tag.
+    pub language: String,
 }
 
 impl TranslationRequest {
@@ -32,8 +44,18 @@ impl TranslationRequest {
             target_language,
             instructions: None,
             context: Vec::new(),
+            references: BTreeMap::new(),
             image: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_references(
+        mut self,
+        references: impl IntoIterator<Item = (usize, SegmentReference)>,
+    ) -> Self {
+        self.references = references.into_iter().collect();
+        self
     }
 
     #[cfg(test)]

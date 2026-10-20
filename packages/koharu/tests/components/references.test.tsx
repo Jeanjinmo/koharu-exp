@@ -1,18 +1,20 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ActivityCenter } from '@/components/editor/ActivityCenter'
 import { PageRail } from '@/components/editor/PageRail'
 import { pairReferences, ReferenceImportDialog } from '@/components/editor/References'
 import { pageKey, pagesKey, projectKey, queryClient } from '@/lib/queries'
-import { useKoharuStore } from '@/lib/store'
+import { receiveJob, useKoharuStore } from '@/lib/store'
 import {
   commands,
   type PageReferenceSummary,
   type PageSummary,
   type Preferences,
 } from '@koharu/bridge/protocol'
+import { toast } from '@koharu/ui/components/toast'
 
 function page(id: string, reference: PageReferenceSummary | null = null): PageSummary {
   return {
@@ -165,5 +167,63 @@ describe('reference import', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Remove reference' }))
 
     await waitFor(() => expect(detach).toHaveBeenCalledWith(['one', 'three']))
+  })
+
+  it('extracts text from the references of every selected page that has one', async () => {
+    const user = userEvent.setup()
+    install([page('one', english), page('two'), page('three', english)])
+    useKoharuStore.setState({ selectedPages: ['one', 'two', 'three'] })
+    const read = vi.spyOn(commands, 'readReferences').mockResolvedValue('job')
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PageRail />
+      </QueryClientProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Actions for one' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Extract text from reference' }))
+
+    await waitFor(() => expect(read).toHaveBeenCalledWith(['one', 'three']))
+  })
+
+  it('names the reading job and reports what it found when it finishes', () => {
+    const add = vi.spyOn(toast, 'add')
+    install([page('one', english)])
+    const job = {
+      id: 'job',
+      kind: 'references' as const,
+      state: 'running' as const,
+      completed: 0,
+      total: 1,
+      page: 'one',
+      stage: null,
+      model: 'paddleocr-vl-1.6',
+      error: null,
+      summary: null,
+    }
+    act(() => receiveJob(job))
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ActivityCenter />
+      </QueryClientProvider>,
+    )
+    expect(screen.getByText('Reading references')).toBeInTheDocument()
+    expect(add).not.toHaveBeenCalled()
+
+    act(() =>
+      receiveJob({
+        ...job,
+        state: 'finished',
+        completed: 1,
+        summary: { kind: 'references', read: 5, unmatched: 1, unused: 0 },
+      }),
+    )
+    expect(add).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Extracted text from references',
+        description:
+          '5 text areas got text from their reference. 1 found no match; it shows that in the Inspector.',
+      }),
+    )
   })
 })

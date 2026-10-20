@@ -106,6 +106,12 @@ export const commands = {
 	 *  alignment of one page applied to the pages after it.
 	 */
 	setReferencePlacement: (pages: EntityId[], placement: ReferencePlacement) => __TAURI_INVOKE<null>("set_reference_placement", { pages, placement }),
+	/**
+	 *  Reads the text of the references of `pages` into their text elements,
+	 *  as a job. Pages whose own text has not been detected and read yet go
+	 *  through Detection and OCR first.
+	 */
+	readReferences: (pages: EntityId[]) => __TAURI_INVOKE<JobId>("read_references", { pages }),
 	getFonts: () => __TAURI_INVOKE<FontFamily[]>("get_fonts"),
 	getFontPreview: (familyName: string) => __TAURI_INVOKE<FontPreviewBytes>("get_font_preview", { familyName }),
 	savePreferences: (pipeline: PipelineConfig, providers: ProviderPreferences, typesetting: TypesettingConfig) => __TAURI_INVOKE<Preferences>("save_preferences", { pipeline: ({...pipeline,translation:({...pipeline.translation,generation:({...pipeline.translation.generation,temperature:pipeline.translation.generation.temperature==null?pipeline.translation.generation.temperature:pipeline.translation.generation.temperature,top_p:pipeline.translation.generation.top_p==null?pipeline.translation.generation.top_p:pipeline.translation.generation.top_p,min_p:pipeline.translation.generation.min_p==null?pipeline.translation.generation.min_p:pipeline.translation.generation.min_p,repeat_penalty:pipeline.translation.generation.repeat_penalty==null?pipeline.translation.generation.repeat_penalty:pipeline.translation.generation.repeat_penalty,frequency_penalty:pipeline.translation.generation.frequency_penalty==null?pipeline.translation.generation.frequency_penalty:pipeline.translation.generation.frequency_penalty,presence_penalty:pipeline.translation.generation.presence_penalty==null?pipeline.translation.generation.presence_penalty:pipeline.translation.generation.presence_penalty})}),processor:({...pipeline.processor,"koharu-layout-rfdetr-seg-2xl":pipeline.processor["koharu-layout-rfdetr-seg-2xl"]==null?pipeline.processor["koharu-layout-rfdetr-seg-2xl"]:({...pipeline.processor["koharu-layout-rfdetr-seg-2xl"],text_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold==null?pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold,bubble_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold==null?pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold,panel_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold==null?pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold:pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold})})}), providers, typesetting }).then((v) => (({...v,pipeline:({...v.pipeline,translation:({...v.pipeline.translation,generation:({...v.pipeline.translation.generation,temperature:v.pipeline.translation.generation.temperature==null?v.pipeline.translation.generation.temperature:v.pipeline.translation.generation.temperature,top_p:v.pipeline.translation.generation.top_p==null?v.pipeline.translation.generation.top_p:v.pipeline.translation.generation.top_p,min_p:v.pipeline.translation.generation.min_p==null?v.pipeline.translation.generation.min_p:v.pipeline.translation.generation.min_p,repeat_penalty:v.pipeline.translation.generation.repeat_penalty==null?v.pipeline.translation.generation.repeat_penalty:v.pipeline.translation.generation.repeat_penalty,frequency_penalty:v.pipeline.translation.generation.frequency_penalty==null?v.pipeline.translation.generation.frequency_penalty:v.pipeline.translation.generation.frequency_penalty,presence_penalty:v.pipeline.translation.generation.presence_penalty==null?v.pipeline.translation.generation.presence_penalty:v.pipeline.translation.generation.presence_penalty})}),processor:({...v.pipeline.processor,"koharu-layout-rfdetr-seg-2xl":v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"]==null?v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"]:({...v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"],text_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold==null?v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].text_threshold,bubble_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold==null?v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].bubble_threshold,panel_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold==null?v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold:v.pipeline.processor["koharu-layout-rfdetr-seg-2xl"].panel_threshold})})})}) as typeof v)),
@@ -324,6 +330,7 @@ export type InpaintingModel = { model: "lama" } | { model: "aot-inpainting" } | 
 
 export type Job = {
 	id: JobId,
+	kind: JobKind,
 	state: JobState,
 	completed: number,
 	total: number,
@@ -331,11 +338,22 @@ export type Job = {
 	stage: Stage | null,
 	model: string | null,
 	error: string | null,
+	/**  What the job found, once it has finished. */
+	summary: JobSummary | null,
 };
 
 export type JobId = string;
 
+/**  What a job does, so its progress can say so between pipeline stages. */
+export type JobKind = "pipeline" | 
+/**  Reading the text of references into their pages. */
+"references";
+
 export type JobState = "running" | "finished" | "failed" | "stopped";
+
+export type JobSummary = {
+	kind: "references",
+} & ReferenceReading;
 
 export type KoharuLayoutRFDetrSeg2XLConfig = {
 	text_threshold?: number | null,
@@ -598,6 +616,21 @@ export type ReferencePlacement = {
 	height: number,
 };
 
+/**  What reading references found, reported when the job ends. */
+export type ReferenceReading = {
+	/**  Text areas of the pages that received text from their reference. */
+	read: number,
+	/**  Text areas of the pages that no reference area matched. */
+	unmatched: number,
+	/**  Text areas found in references that matched nothing on their page. */
+	unused: number,
+};
+
+export type ReferenceText = {
+	text: string,
+	language: string,
+};
+
 export type Revision = number;
 
 export type RoremMixedConfig = {
@@ -637,6 +670,11 @@ export type TextContent = {
 	id: EntityId,
 	source: SourceText | null,
 	translation: Translation | null,
+	/**
+	 *  What the page's reference letters here, when it is in another
+	 *  language than the translation or was read from the reference.
+	 */
+	reference: ReferenceText | null,
 	role: string | null,
 	source_region: EntityId | null,
 };
