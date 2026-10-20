@@ -251,6 +251,11 @@ impl Host for KoharuHost {
                         "Set an element's translation, or pass null to remove it. The translation is tagged with its language, which decides how lines break.",
                         metadata(ToolGroup::Text),
                     ),
+                    definition::<SetTranslations>(
+                        "set_translations",
+                        "Set the translations of many elements in one call and one undo step. Every element is validated first; if any is invalid, nothing changes. Prefer this over repeated set_translation calls.",
+                        metadata(ToolGroup::Text),
+                    ),
                     definition::<SetTypography>(
                         "set_typography",
                         "Replace an element's typography settings. Font is a family name from available_fonts.",
@@ -415,7 +420,10 @@ impl Host for KoharuHost {
                         })
                         .await;
                 };
-                let language = translation_language(arguments.language)?;
+                let language = match explicit_language(arguments.language)? {
+                    Some(language) => language,
+                    None => target_language()?,
+                };
                 self.mutate(|project| {
                     Box::pin(async move {
                         let result = json!({ "element": element, "language": language.as_str() });
@@ -425,6 +433,38 @@ impl Host for KoharuHost {
                             language: Some(language),
                         };
                         Ok((project.set_translations(vec![update]).await?, result))
+                    })
+                })
+                .await
+            }
+            "set_translations" => {
+                let arguments: SetTranslations = arguments(&call)?;
+                let target = target_language()?;
+                let updates = arguments
+                    .translations
+                    .into_iter()
+                    .map(|translation| {
+                        let layer = entity(&translation.element)?;
+                        let language = explicit_language(translation.language)
+                            .with_context(|| format!("element {layer}"))?
+                            .unwrap_or_else(|| target.clone());
+                        Ok(TranslationUpdate {
+                            layer,
+                            text: translation.text,
+                            language: Some(language),
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let elements = updates
+                    .iter()
+                    .map(|update| update.layer)
+                    .collect::<Vec<_>>();
+                self.mutate(|project| {
+                    Box::pin(async move {
+                        Ok((
+                            project.set_translations(updates).await?,
+                            json!({ "elements": elements }),
+                        ))
                     })
                 })
                 .await
@@ -584,18 +624,23 @@ fn arguments<T: for<'de> Deserialize<'de>>(call: &ToolCall) -> Result<T> {
         .with_context(|| format!("invalid arguments for {}", call.name))
 }
 
-/// Agent translations always carry a language so the renderer breaks lines
-/// with that language's rules instead of the English fallback for untagged text.
-fn translation_language(language: Option<String>) -> Result<LanguageTag> {
-    match language.filter(|language| !language.trim().is_empty()) {
-        Some(language) => LanguageTag::new(language.trim())
-            .with_context(|| format!("{language:?} is not a valid BCP 47 language tag")),
-        None => {
-            let pipeline = PipelineConfig::load()?;
-            let target = pipeline.read()?.translation.target_language;
-            Ok(LanguageTag::new(target.tag())?)
-        }
-    }
+fn explicit_language(language: Option<String>) -> Result<Option<LanguageTag>> {
+    language
+        .filter(|language| !language.trim().is_empty())
+        .map(|language| {
+            LanguageTag::new(language.trim())
+                .with_context(|| format!("{language:?} is not a valid BCP 47 language tag"))
+        })
+        .transpose()
+}
+
+/// Agent translations without an explicit language are tagged with the
+/// configured target language, so the renderer breaks lines with that
+/// language's rules instead of the English fallback for untagged text.
+fn target_language() -> Result<LanguageTag> {
+    let pipeline = PipelineConfig::load()?;
+    let target = pipeline.read()?.translation.target_language;
+    Ok(LanguageTag::new(target.tag())?)
 }
 
 fn entity(value: &str) -> Result<EntityId> {
@@ -653,6 +698,20 @@ struct SetText {
 struct SetTranslation {
     element: String,
     text: Option<String>,
+    /// BCP 47 tag of the translation's language, such as `id-ID`. Defaults to
+    /// the target language in Koharu's settings.
+    language: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SetTranslations {
+    translations: Vec<ElementTranslation>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ElementTranslation {
+    element: String,
+    text: String,
     /// BCP 47 tag of the translation's language, such as `id-ID`. Defaults to
     /// the target language in Koharu's settings.
     language: Option<String>,
