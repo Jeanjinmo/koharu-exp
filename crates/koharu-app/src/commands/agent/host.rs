@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, sync::OnceLock};
+use std::{collections::BTreeSet, future::Future, pin::Pin, sync::OnceLock};
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -8,9 +8,10 @@ use koharu_desktop::{Desktop, Frame};
 use koharu_pipeline::{
     Committer, Operation, PipelineConfig, RunStatus, Scope, Stage, StageOutput, StopToken,
 };
-use koharu_scene::{Commit, EntityId, LanguageTag, Snapshot};
+use koharu_renderer::RenderDiagnostic;
+use koharu_scene::{Commit, EntityId, LanguageTag, Revision, Snapshot};
 use schemars::{JsonSchema, schema_for};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager as _};
 use tauri_runtime_cef::CefRuntime;
@@ -93,6 +94,21 @@ impl KoharuHost {
     where
         T: serde::Serialize + Send,
     {
+        let (committed, value) = self.commit(mutation).await?;
+        committed.invocation(value)
+    }
+
+    async fn commit<T>(
+        &self,
+        mutation: impl for<'project> FnOnce(
+            &'project mut Project,
+        ) -> Pin<
+            Box<dyn Future<Output = Result<(Commit, T)>> + Send + 'project>,
+        >,
+    ) -> Result<(Committed, T)>
+    where
+        T: Send,
+    {
         let (commit, value, page, project) = {
             let current = self.handle.state::<CurrentProject>();
             let mut current = current.project.lock().await;
@@ -102,13 +118,33 @@ impl KoharuHost {
             project.reconcile_page();
             (commit, value, project.active_page(), project.info())
         };
-        let revision = commit.revision;
-        self.synchronize(commit, page, project.clone()).await?;
-        Invocation::changed(json!({
-            "revision": revision,
-            "project": project,
-            "result": value,
-        }))
+        let committed = Committed {
+            revision: commit.revision,
+            snapshot: commit.snapshot.clone(),
+            project: project.clone(),
+        };
+        self.synchronize(commit, page, project).await?;
+        Ok((committed, value))
+    }
+
+    /// Lays out the given text elements as the renderer would and reports
+    /// those whose text overflows its frame or shrinks below the readable size.
+    async fn text_fit(
+        &self,
+        snapshot: &Snapshot,
+        elements: &[EntityId],
+    ) -> Result<Vec<FitWarning>> {
+        let pages = elements
+            .iter()
+            .map(|element| Project::containing_page(snapshot, *element))
+            .collect::<Result<BTreeSet<_>>>()?;
+        let renderer = self.handle.state::<Desktop>().renderer();
+        let mut diagnostics = Vec::new();
+        for page in pages {
+            let frame = renderer.render(snapshot, page).await?;
+            diagnostics.extend_from_slice(frame.diagnostics());
+        }
+        Ok(fit_warnings(&diagnostics, elements))
     }
 
     /// Presents a committed agent change. Agent tools also run outside the
@@ -248,12 +284,12 @@ impl Host for KoharuHost {
                     ),
                     definition::<SetTranslation>(
                         "set_translation",
-                        "Set an element's translation, or pass null to remove it. The translation is tagged with its language, which decides how lines break.",
+                        "Set an element's translation, or pass null to remove it. The translation is tagged with its language, which decides how lines break. The result warns when the text overflows its frame or shrinks below the readable size.",
                         metadata(ToolGroup::Text),
                     ),
                     definition::<SetTranslations>(
                         "set_translations",
-                        "Set the translations of many elements in one call and one undo step. Every element is validated first; if any is invalid, nothing changes. Prefer this over repeated set_translation calls.",
+                        "Set the translations of many elements in one call and one undo step. Every element is validated first; if any is invalid, nothing changes. Prefer this over repeated set_translation calls. The result warns about text that overflows its frame or shrinks below the readable size.",
                         metadata(ToolGroup::Text),
                     ),
                     definition::<SetTypography>(
@@ -424,18 +460,24 @@ impl Host for KoharuHost {
                     Some(language) => language,
                     None => target_language()?,
                 };
-                self.mutate(|project| {
-                    Box::pin(async move {
-                        let result = json!({ "element": element, "language": language.as_str() });
-                        let update = TranslationUpdate {
-                            layer: element,
-                            text,
-                            language: Some(language),
-                        };
-                        Ok((project.set_translations(vec![update]).await?, result))
+                let update = TranslationUpdate {
+                    layer: element,
+                    text,
+                    language: Some(language.clone()),
+                };
+                let (committed, ()) = self
+                    .commit(|project| {
+                        Box::pin(
+                            async move { Ok((project.set_translations(vec![update]).await?, ())) },
+                        )
                     })
-                })
-                .await
+                    .await?;
+                let warnings = self.text_fit(&committed.snapshot, &[element]).await?;
+                committed.invocation(json!({
+                    "element": element,
+                    "language": language.as_str(),
+                    "warnings": warnings,
+                }))
             }
             "set_translations" => {
                 let arguments: SetTranslations = arguments(&call)?;
@@ -459,15 +501,13 @@ impl Host for KoharuHost {
                     .iter()
                     .map(|update| update.layer)
                     .collect::<Vec<_>>();
-                self.mutate(|project| {
-                    Box::pin(async move {
-                        Ok((
-                            project.set_translations(updates).await?,
-                            json!({ "elements": elements }),
-                        ))
+                let (committed, ()) = self
+                    .commit(|project| {
+                        Box::pin(async move { Ok((project.set_translations(updates).await?, ())) })
                     })
-                })
-                .await
+                    .await?;
+                let warnings = self.text_fit(&committed.snapshot, &elements).await?;
+                committed.invocation(json!({ "elements": elements, "warnings": warnings }))
             }
             "set_typography" => {
                 let arguments: SetTypography = arguments(&call)?;
@@ -575,6 +615,69 @@ impl Host for KoharuHost {
             name => bail!("unknown Koharu tool {name}"),
         }
     }
+}
+
+/// The project state right after an agent edit was recorded and presented.
+struct Committed {
+    revision: Revision,
+    snapshot: Snapshot,
+    project: ProjectInfo,
+}
+
+impl Committed {
+    fn invocation(self, result: impl Serialize) -> Result<Invocation> {
+        Invocation::changed(json!({
+            "revision": self.revision,
+            "project": self.project,
+            "result": result,
+        }))
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+struct FitWarning {
+    element: EntityId,
+    /// Final font size chosen by the layout.
+    font_size: f32,
+    /// The laid-out text extends past its frame.
+    overflows: bool,
+    /// Present when the text had to shrink below this readable size.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    minimum_font_size: Option<f32>,
+}
+
+fn fit_warnings(diagnostics: &[RenderDiagnostic], elements: &[EntityId]) -> Vec<FitWarning> {
+    elements
+        .iter()
+        .filter_map(|element| {
+            let mut warning = None::<FitWarning>;
+            for diagnostic in diagnostics {
+                let (entity, font_size, overflows, minimum_font_size) = match diagnostic {
+                    RenderDiagnostic::TextOverflow {
+                        entity, font_size, ..
+                    } => (entity, *font_size, true, None),
+                    RenderDiagnostic::TextBelowReadableSize {
+                        entity,
+                        font_size,
+                        minimum_font_size,
+                    } => (entity, *font_size, false, Some(*minimum_font_size)),
+                    RenderDiagnostic::MissingAsset { .. } => continue,
+                };
+                if entity != element {
+                    continue;
+                }
+                let warning = warning.get_or_insert(FitWarning {
+                    element: *element,
+                    font_size,
+                    overflows: false,
+                    minimum_font_size: None,
+                });
+                warning.overflows |= overflows;
+                warning.minimum_font_size = warning.minimum_font_size.or(minimum_font_size);
+            }
+            warning
+        })
+        .collect()
 }
 
 struct AgentCommitter {
@@ -862,5 +965,66 @@ impl RunPipeline {
             (true, false) => Ok(Scope::Entities(entities(&self.elements)?)),
             (false, false) => bail!("pipeline scope cannot contain both pages and elements"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use koharu_renderer::RenderBounds;
+
+    use super::*;
+
+    #[test]
+    fn fit_warnings_merge_diagnostics_for_the_edited_elements() {
+        let (shrunk_and_overflowing, shrunk, untouched) =
+            (EntityId::new(), EntityId::new(), EntityId::new());
+        let diagnostics = [
+            RenderDiagnostic::TextBelowReadableSize {
+                entity: shrunk_and_overflowing,
+                font_size: 7.0,
+                minimum_font_size: 9.0,
+            },
+            RenderDiagnostic::TextOverflow {
+                entity: shrunk_and_overflowing,
+                available: RenderBounds::default(),
+                actual_width: 120.0,
+                actual_height: 80.0,
+                font_size: 7.0,
+            },
+            RenderDiagnostic::TextBelowReadableSize {
+                entity: shrunk,
+                font_size: 8.0,
+                minimum_font_size: 9.0,
+            },
+            RenderDiagnostic::TextOverflow {
+                entity: untouched,
+                available: RenderBounds::default(),
+                actual_width: 1.0,
+                actual_height: 1.0,
+                font_size: 9.0,
+            },
+            RenderDiagnostic::MissingAsset {
+                entity: shrunk,
+                role: "source".to_owned(),
+            },
+        ];
+
+        assert_eq!(
+            fit_warnings(&diagnostics, &[shrunk, shrunk_and_overflowing]),
+            [
+                FitWarning {
+                    element: shrunk,
+                    font_size: 8.0,
+                    overflows: false,
+                    minimum_font_size: Some(9.0),
+                },
+                FitWarning {
+                    element: shrunk_and_overflowing,
+                    font_size: 7.0,
+                    overflows: true,
+                    minimum_font_size: Some(9.0),
+                },
+            ]
+        );
     }
 }

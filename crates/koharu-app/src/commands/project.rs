@@ -1203,6 +1203,18 @@ impl Project {
         Ok(())
     }
 
+    pub(crate) fn containing_page(snapshot: &Snapshot, entity: EntityId) -> Result<EntityId> {
+        let mut current = entity;
+        loop {
+            if snapshot.page(current).is_ok() {
+                return Ok(current);
+            }
+            current = snapshot
+                .parent(current)?
+                .with_context(|| format!("element {entity} is not on a page"))?;
+        }
+    }
+
     fn text_content(snapshot: &Snapshot, layer: EntityId) -> Result<EntityId> {
         snapshot
             .text_layer(layer)?
