@@ -19,17 +19,23 @@ export function StatusBar({ onZoomChange }: StatusBarProps) {
 
   return (
     <footer className='flex h-7 shrink-0 items-center gap-3 border-t border-border/80 bg-[var(--surface-toolbar)] px-2.5 text-[10px] text-muted-foreground'>
-      <div className='flex w-36 shrink-0 items-center gap-2'>
-        <Slider
-          aria-label={t('status.zoom')}
-          min={10}
-          max={800}
-          step={5}
-          value={Math.min(800, Math.max(10, zoom))}
-          className='w-24 shrink-0 [&_[data-slot=slider-thumb]]:size-2'
-          onValueChange={(value) => onZoomChange(value / 100)}
-        />
-        <span className='w-9 shrink-0 text-right text-foreground tabular-nums'>{zoom}%</span>
+      {/* The slider fills its own box, since it stretches to the width of
+          whatever holds it, and the percentage keeps its own room after it. */}
+      <div className='flex shrink-0 items-center gap-2'>
+        <div className='w-24 shrink-0'>
+          <Slider
+            aria-label={t('status.zoom')}
+            min={10}
+            max={800}
+            step={5}
+            value={Math.min(800, Math.max(10, zoom))}
+            className='[&_[data-slot=slider-thumb]]:size-2'
+            onValueChange={(value) => onZoomChange(value / 100)}
+          />
+        </div>
+        <span className='min-w-9 shrink-0 text-right whitespace-nowrap text-foreground tabular-nums'>
+          {zoom}%
+        </span>
       </div>
       {page && <CompareButton />}
       <div className='flex-1' />

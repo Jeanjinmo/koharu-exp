@@ -1071,6 +1071,10 @@ describe('greenfield editor', () => {
     const size = screen.getByText('1000 × 1500 px')
     expect(zoom.compareDocumentPosition(size) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
     expect(screen.queryByRole('button', { name: 'Fit window' })).not.toBeInTheDocument()
+    // The slider stretches to whatever holds it, so it gets a box of its own
+    // and the percentage keeps its room before Compare (#04).
+    expect(screen.getByRole('group', { name: 'Zoom' }).parentElement).toHaveClass('w-24')
+    expect(zoom.parentElement).not.toHaveClass('w-36')
   })
 
   it('changes the pipeline scope and selected stages from the runtime selector', async () => {
