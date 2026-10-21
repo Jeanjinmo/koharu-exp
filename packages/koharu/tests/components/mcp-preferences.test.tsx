@@ -155,6 +155,15 @@ describe('MCP tools settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Text-only model' }))
     await waitFor(() => expect(setTools).toHaveBeenCalledWith('text', []))
     expect(await screen.findByText('Tools that need to see images are off.')).toBeInTheDocument()
+    // The chosen profile is filled, without the ghost hover that darkened
+    // it while the pointer stayed on it (#01).
+    const chosen = screen.getByRole('button', { name: 'Text-only model' })
+    expect(chosen).toHaveAttribute('aria-pressed', 'true')
+    expect(chosen.className).toContain('bg-primary')
+    expect(chosen.className).not.toContain('hover:bg-muted')
+    expect(screen.getByRole('button', { name: 'Vision model' }).className).not.toContain(
+      'bg-primary',
+    )
   })
 
   it('lists recent tool calls with their pages and clears them', async () => {

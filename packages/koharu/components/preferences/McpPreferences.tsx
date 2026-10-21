@@ -28,6 +28,7 @@ import { Button } from '@koharu/ui/components/button'
 import { Checkbox } from '@koharu/ui/components/checkbox'
 import { Switch } from '@koharu/ui/components/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@koharu/ui/components/tooltip'
+import { cn } from '@koharu/ui/lib/utils'
 
 const groups: readonly ToolGroup[] = ['read', 'pages', 'text', 'image', 'pipeline', 'output']
 const profiles: readonly ToolProfile[] = ['vision', 'text', 'read', 'custom']
@@ -157,15 +158,20 @@ export function McpPreferences() {
           <div className='grid gap-1.5'>
             <div className='grid grid-cols-2 gap-0.5 rounded-xl border border-input bg-background p-0.5'>
               {profiles.map((choice) => (
+                // The chosen profile is a filled button of its own, not a
+                // restyled ghost one: the ghost's dark-theme hover outranks
+                // such restyling and turned a just-clicked profile dark.
                 <Button
                   key={choice}
                   type='button'
-                  variant='ghost'
+                  variant={profile === choice ? 'default' : 'ghost'}
                   size='sm'
                   disabled={!enabled}
                   aria-pressed={profile === choice}
-                  data-active={profile === choice}
-                  className='h-8 text-[10px] text-muted-foreground hover:text-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground data-[active=true]:hover:bg-primary/90 data-[active=true]:hover:text-primary-foreground'
+                  className={cn(
+                    'h-8 text-[10px]',
+                    profile !== choice && 'text-muted-foreground hover:text-foreground',
+                  )}
                   onClick={() =>
                     apply(call(commands.setMcpTools, choice, settings.config.disabled_tools))
                   }
