@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use reqwest::{StatusCode, header};
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt as _,
-    model::{CallToolRequest, CallToolRequestParams, ClientRequest, ContentBlock},
+    model::{CallToolRequest, CallToolRequestParams, ClientRequest, ContentBlock, ServerResult},
     service::{NotificationContext, PeerRequestOptions, RunningService},
     transport::{
         StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig,
@@ -44,11 +44,13 @@ pub(super) const PIXEL: &str = "UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAwA0JaQA
 const INITIALIZE: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"koharu-test","version":"0"}}}"#;
 
 /// Stand-in for Koharu's desktop host. `run_pipeline` blocks until its
-/// control is cancelled, like the real pipeline tool.
+/// control is cancelled, like the real pipeline tool, and `move_page` until
+/// it is released.
 #[derive(Default)]
 pub(super) struct FakeHost {
     started: Arc<Notify>,
     cancelled: Arc<Notify>,
+    release: Arc<Notify>,
 }
 
 #[async_trait]
@@ -85,6 +87,11 @@ impl Host for FakeHost {
                 control.cancelled().await;
                 self.cancelled.notify_one();
                 bail!("pipeline processing was cancelled")
+            }
+            "move_page" => {
+                self.started.notify_one();
+                self.release.notified().await;
+                Invocation::changed(json!({ "moved": true }))
             }
             name => bail!("unknown Koharu tool {name}"),
         }
@@ -513,7 +520,14 @@ async fn stopping_waits_for_running_calls_and_stop_now_cancels_them() -> Result<
 
     supervisor.stop_now();
     tokio::time::timeout(Duration::from_secs(5), cancelled.notified()).await?;
-    drop(pipeline);
+    // The client still learns that its call was cancelled.
+    let ServerResult::CallToolResult(cancelled) =
+        tokio::time::timeout(Duration::from_secs(5), pipeline.await_response()).await??
+    else {
+        bail!("the pipeline call got no tool result");
+    };
+    assert_eq!(cancelled.is_error, Some(true));
+    assert!(text_of(&cancelled.content).is_some_and(|text| text.contains("cancelled")));
     reaches(&mut status, |status| *status == ServerStatus::Off).await?;
     eventually(|| async { initialize(&url, &[]).await.is_err() })
         .await
@@ -527,6 +541,56 @@ async fn stopping_waits_for_running_calls_and_stop_now_cancels_them() -> Result<
         pointer["url"],
         json!(running_url(&restarted).context("url")?)
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn stopping_answers_running_calls_before_closing() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let host = FakeHost::default();
+    let (started, release) = (host.started.clone(), host.release.clone());
+    let (supervisor, token) = supervise(
+        host,
+        McpConfig {
+            port: 0,
+            ..McpConfig::default()
+        },
+        &directory.path().join("mcp.json"),
+    )?;
+    let mut status = supervisor.status();
+    let running = reaches(&mut status, |status| running_url(status).is_some()).await?;
+    let client = connect_as((), running_url(&running).context("url")?, &token).await?;
+    let slow = client
+        .send_cancellable_request(
+            ClientRequest::from(CallToolRequest::new(CallToolRequestParams::new(
+                "move_page",
+            ))),
+            PeerRequestOptions::no_options(),
+        )
+        .await?;
+    tokio::time::timeout(Duration::from_secs(5), started.notified()).await?;
+
+    supervisor.set_enabled(false)?;
+    reaches(&mut status, |status| {
+        *status == ServerStatus::Stopping { tasks: 1 }
+    })
+    .await?;
+    let refused = client
+        .call_tool(CallToolRequestParams::new("inspect_project"))
+        .await?;
+    assert_eq!(refused.is_error, Some(true));
+
+    // The running call finishes while the server stops, and its answer
+    // reaches the client before the connection closes (#17).
+    release.notify_one();
+    let ServerResult::CallToolResult(answer) =
+        tokio::time::timeout(Duration::from_secs(5), slow.await_response()).await??
+    else {
+        bail!("the running call got no tool result");
+    };
+    assert_ne!(answer.is_error, Some(true));
+    assert!(text_of(&answer.content).is_some_and(|text| text.contains("moved")));
+    reaches(&mut status, |status| *status == ServerStatus::Off).await?;
     Ok(())
 }
 

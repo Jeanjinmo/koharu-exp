@@ -16,14 +16,16 @@ use std::{
     io::Write as _,
     net::{Ipv4Addr, SocketAddr},
     path::Path,
+    pin::Pin,
     sync::Arc,
+    task::{Context, Poll},
 };
 
 use anyhow::{Context as _, Result};
 use http_body_util::{BodyExt as _, Full, combinators::BoxBody};
 use hyper::{
-    Request, Response, StatusCode,
-    body::{Bytes, Incoming},
+    Method, Request, Response, StatusCode,
+    body::{Bytes, Frame, Incoming, SizeHint},
     header::{HeaderValue, WWW_AUTHENTICATE},
     server::conn::http1,
     service::service_fn,
@@ -36,6 +38,7 @@ use rmcp::transport::{
 use serde_json::json;
 use tokio::{
     net::{TcpListener, TcpStream},
+    sync::watch,
     task::JoinSet,
 };
 use tokio_util::sync::CancellationToken;
@@ -93,6 +96,8 @@ struct Server {
     shutdown: CancellationToken,
     calls: Arc<Calls>,
     clients: Arc<Clients>,
+    /// Answers to client messages that are still being sent.
+    answers: Arc<watch::Sender<usize>>,
 }
 
 impl Server {
@@ -119,9 +124,14 @@ impl Server {
             Arc::default(),
             config,
         );
+        let answers = Arc::new(watch::Sender::new(0));
         drop(tokio::spawn(accept(
             listener,
-            Arc::new(Endpoint { service, token }),
+            Arc::new(Endpoint {
+                service,
+                token,
+                answers: answers.clone(),
+            }),
             shutdown.clone(),
         )));
         drop(tokio::spawn(announce_tool_changes(
@@ -134,11 +144,19 @@ impl Server {
             shutdown,
             calls,
             clients,
+            answers,
         })
     }
 
     fn url(&self) -> String {
         format!("http://{}{PATH}", self.address)
+    }
+
+    /// Waits until the answers being sent have reached their clients, or
+    /// `patience` runs out, so closing the server does not cut them off.
+    async fn deliver_answers(&self, patience: std::time::Duration) {
+        let mut answers = self.answers.subscribe();
+        let _ = tokio::time::timeout(patience, answers.wait_for(|open| *open == 0)).await;
     }
 }
 
@@ -185,6 +203,7 @@ async fn announce_tool_changes<H>(
 struct Endpoint<H> {
     service: StreamableHttpService<Handler<H>, LocalSessionManager>,
     token: Token,
+    answers: Arc<watch::Sender<usize>>,
 }
 
 impl<H> Endpoint<H>
@@ -202,7 +221,69 @@ where
                 .insert(WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
             return response;
         }
-        self.service.handle(request).await
+        // A POST carries a client message, and its response streams the
+        // answer, such as a tool's result. A GET stream only carries
+        // notifications and stays open, so it is not an answer.
+        let answer = (request.method() == Method::POST).then(|| Answer::new(&self.answers));
+        let response = self.service.handle(request).await;
+        match answer {
+            Some(answer) => response.map(|body| {
+                Answered {
+                    body,
+                    answer: Some(answer),
+                }
+                .boxed()
+            }),
+            None => response,
+        }
+    }
+}
+
+/// One answer being sent; it is done when dropped.
+struct Answer(Arc<watch::Sender<usize>>);
+
+impl Answer {
+    fn new(answers: &Arc<watch::Sender<usize>>) -> Self {
+        answers.send_modify(|open| *open += 1);
+        Self(answers.clone())
+    }
+}
+
+impl Drop for Answer {
+    fn drop(&mut self) {
+        self.0.send_modify(|open| *open -= 1);
+    }
+}
+
+/// A response body that counts as an answer being sent until its last frame
+/// has been taken, or the connection drops it.
+struct Answered {
+    body: Body,
+    answer: Option<Answer>,
+}
+
+impl hyper::body::Body for Answered {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, Infallible>>> {
+        let this = self.get_mut();
+        let frame = Pin::new(&mut this.body).poll_frame(context);
+        if let Poll::Ready(None) = frame {
+            this.answer = None;
+        }
+        frame
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.body.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.body.size_hint()
     }
 }
 

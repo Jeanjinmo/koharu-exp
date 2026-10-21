@@ -25,6 +25,8 @@ const BIND_PATIENCE: Duration = Duration::from_secs(3);
 const BIND_RETRY: Duration = Duration::from_millis(500);
 /// How often a running server forgets clients whose session has closed.
 const PRUNE_INTERVAL: Duration = Duration::from_secs(5);
+/// How long stopping waits for finished calls' answers to reach their clients.
+const ANSWER_PATIENCE: Duration = Duration::from_secs(3);
 
 /// What the MCP server is doing, as shown in Koharu's settings.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Type)]
@@ -335,11 +337,13 @@ where
         lock(&self.stopping).take();
         if resumed {
             server.calls.set_accepting(true);
-            Some(server)
-        } else {
-            tracing::info!("MCP server stopped");
-            None
+            return Some(server);
         }
+        // The calls are done, but their answers may still be on their way;
+        // closing now would leave clients without them.
+        server.deliver_answers(ANSWER_PATIENCE).await;
+        tracing::info!("MCP server stopped");
+        None
     }
 
     fn token(&self) -> Result<Token> {
