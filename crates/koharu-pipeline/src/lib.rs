@@ -25,7 +25,7 @@ pub use error::{ErrorKind, PipelineError};
 pub use pipeline::Pipeline;
 pub use progress::{Progress, ProgressSink};
 pub use reading::LayoutBox;
-pub use report::{Committer, Report, RunStatus, StageOutput};
+pub use report::{Committer, Report, RunStatus, SkippedStage, StageOutput};
 pub use request::{InpaintingMask, MaskArea, Operation, Request, StopToken};
 pub use resources::{DeviceResources, ResourceSnapshot};
 pub use scope::{Bounds, Scope};

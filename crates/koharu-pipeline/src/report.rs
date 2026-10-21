@@ -19,6 +19,15 @@ pub struct Report {
     pub completed: usize,
     pub total: usize,
     pub elapsed: Duration,
+    /// Stages that did not run on a page, and why.
+    pub skipped: Vec<SkippedStage>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SkippedStage {
+    pub page: koharu_scene::EntityId,
+    pub stage: Stage,
+    pub reason: String,
 }
 
 #[derive(Debug)]

@@ -231,6 +231,21 @@ impl KoharuHost {
             let after = text_elements(&self.snapshot().await?, page)?;
             result["added_elements"] = json!(after.difference(&before).collect::<Vec<_>>());
         }
+        // A stage with nothing to do is not the same as one that found
+        // nothing, so say which stages did not run and why.
+        if !report.skipped.is_empty() {
+            result["skipped"] = json!(
+                report
+                    .skipped
+                    .iter()
+                    .map(|skipped| json!({
+                        "page": skipped.page,
+                        "stage": skipped.stage,
+                        "reason": skipped.reason,
+                    }))
+                    .collect::<Vec<_>>()
+            );
+        }
         Ok(on_page(Invocation::changed(result)?, page))
     }
 
@@ -1059,7 +1074,7 @@ fn tools() -> &'static [Tool] {
                 ),
                 definition::<RunPipeline>(
                     "run_pipeline",
-                    "Run Koharu's configured processing pipeline for the whole project, selected pages, selected text elements, or one region of a page. A region run reports the text elements it added; use it with the detection operation to pick up text that was missed.",
+                    "Run Koharu's configured processing pipeline for the whole project, selected pages, selected text elements, or one region of a page. A region run reports the text elements it added; use it with the detection operation to pick up text that was missed. Stages that did not run are listed under skipped with the reason, for example a region whose bubble still holds a text element; delete that element to detect the bubble again.",
                     ToolMetadata {
                         mutates_image: true,
                         ..metadata(ToolGroup::Pipeline)

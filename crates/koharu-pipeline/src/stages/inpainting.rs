@@ -106,9 +106,9 @@ impl StageProcessor for Processor {
         }
     }
 
-    fn skip(&self, input: &StageInput) -> Result<bool> {
+    fn skip(&self, input: &StageInput) -> Result<Option<String>> {
         if input.inpainting_mask.is_some() {
-            return Ok(false);
+            return Ok(None);
         }
         let source = AssetRole::new("source")?;
         for entity in input.scene.children(input.page)? {
@@ -118,10 +118,12 @@ impl StageProcessor for Processor {
                 .is_some_and(|layer| layer.kind == RasterLayerKind::Cleanup)
                 && input.scene.asset(entity, &source)?.is_some()
             {
-                return Ok(true);
+                return Ok(Some(format!(
+                    "the page already has a cleanup layer, {entity}"
+                )));
             }
         }
-        Ok(false)
+        Ok(None)
     }
 
     fn unload(&self) -> bool {
@@ -1342,8 +1344,13 @@ mod tests {
         );
         let processor = Processor::new(InpaintingModel::LaMa {}, koharu_ml::Device::cpu()).unwrap();
 
-        assert!(processor.skip(&automatic).unwrap());
-        assert!(!processor.skip(&manual).unwrap());
+        assert!(
+            processor
+                .skip(&automatic)
+                .unwrap()
+                .is_some_and(|reason| reason.starts_with("the page already has a cleanup layer"))
+        );
+        assert_eq!(processor.skip(&manual).unwrap(), None);
     }
 
     fn rectangle_region([left, top, right, bottom]: [u32; 4]) -> FlatFillRegion {

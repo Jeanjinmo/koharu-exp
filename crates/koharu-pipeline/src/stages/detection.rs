@@ -24,7 +24,7 @@ use koharu_ml::koharu_layout_rfdetr_seg_2xl::{
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, BubbleRegion, DetectionAnalysis, DetectionLabel,
     EntityId, EntityOrigin, FitsTo, FlowsIn, Generation, Geometry, Inside, Origin, PanelRegion,
-    Point, RecognizedFrom, Region, RegionKind, RegionSpec, RemovePolicy, TextLayout,
+    Point, Presents, RecognizedFrom, Region, RegionKind, RegionSpec, RemovePolicy, TextLayout,
     TextLayoutKind, TextRegion, TextRole, Typography, WritingMode,
 };
 use rayon::prelude::*;
@@ -126,9 +126,10 @@ impl StageProcessor for Processor {
     }
 
     // Detection replaces the regions in its scope. It never runs where that
-    // would replace text, or a bubble that existing text sits inside or flows
-    // into, so a region run only adds what was missed.
-    fn skip(&self, input: &StageInput) -> Result<bool> {
+    // would replace a region that a text element still uses, so a region run
+    // only adds what was missed. Regions left behind by deleted text elements
+    // do not count.
+    fn skip(&self, input: &StageInput) -> Result<Option<String>> {
         for entity in input.scene.descendants(input.page)? {
             let id = entity.id();
             if !input.contains_entity(id)? {
@@ -137,14 +138,19 @@ impl StageProcessor for Processor {
             let Some(region) = entity.component::<Region>()? else {
                 continue;
             };
-            if region.kind == TextRegion::kind()
-                || input.scene.relations_to_as::<Inside>(id).next().is_some()
-                || input.scene.relations_to_as::<FlowsIn>(id).next().is_some()
-            {
-                return Ok(true);
-            }
+            let Some(element) = text_using(&input.scene, id) else {
+                continue;
+            };
+            let reason = if region.kind == TextRegion::kind() {
+                format!("the area overlaps text element {element}")
+            } else if region.kind == BubbleRegion::kind() {
+                format!("bubble {id} already holds text element {element}")
+            } else {
+                format!("region {id} already holds text element {element}")
+            };
+            return Ok(Some(reason));
         }
-        Ok(false)
+        Ok(None)
     }
 
     fn unload(&self) -> bool {
@@ -209,6 +215,31 @@ impl Model {
         })
         .await
     }
+}
+
+/// A text element that uses `region`: one laid out in it or flowing into
+/// it, one whose text was detected in it, or one using a region inside it.
+fn text_using(scene: &koharu_scene::Snapshot, region: EntityId) -> Option<EntityId> {
+    scene
+        .relations_to_as::<FitsTo>(region)
+        .chain(scene.relations_to_as::<FlowsIn>(region))
+        .map(|relation| relation.value().source)
+        .next()
+        .or_else(|| {
+            scene
+                .relations_to_as::<RecognizedFrom>(region)
+                .find_map(|relation| {
+                    scene
+                        .relations_to_as::<Presents>(relation.value().source)
+                        .map(|presents| presents.value().source)
+                        .next()
+                })
+        })
+        .or_else(|| {
+            scene
+                .relations_to_as::<Inside>(region)
+                .find_map(|relation| text_using(scene, relation.value().source))
+        })
 }
 
 struct DetectedRegion<'a> {
@@ -1873,8 +1904,9 @@ mod tests {
     };
     use koharu_ml::koharu_layout_rfdetr_seg_2xl::{KoharuLayoutDetection, KoharuLayoutMask};
     use koharu_scene::{
-        At, BubbleRegion, FitsTo, FlowsIn, Geometry, Inside, Origin, PageDraft, Session,
-        TextLayout, TextLayoutKind, TextRegion, Typography, WritingMode,
+        At, BubbleRegion, EntityId, FitsTo, FlowsIn, Geometry, Inside, Origin, PageDraft,
+        RecognizedFrom, RemovePolicy, Session, TextLayout, TextLayoutKind, TextRegion, Typography,
+        WritingMode,
     };
 
     use super::{
@@ -1902,26 +1934,48 @@ mod tests {
         assert_eq!(settings.panel_threshold, Some(0.55));
     }
 
+    /// A text element whose text was detected in `region`.
+    fn text_element(
+        edit: &mut koharu_scene::Edit,
+        page: EntityId,
+        region: EntityId,
+    ) -> koharu_scene::Result<(EntityId, EntityId)> {
+        let content = edit.add_text_content(page, At::End)?;
+        edit.relate::<RecognizedFrom>(content, region)?;
+        let layer = edit.add_text_layer(
+            page,
+            At::End,
+            content,
+            &TextLayout {
+                origin: Origin::User,
+                kind: TextLayoutKind::Paragraph,
+                angle_degrees: None,
+            },
+        )?;
+        Ok((layer, content))
+    }
+
     #[tokio::test]
     async fn detection_skips_a_page_with_existing_text() {
         let mut session = Session::memory().await.unwrap();
-        let mut page = None;
+        let mut ids = None;
         let patch = session
             .snapshot()
             .patch(|edit| {
-                let id = edit.add_page(PageDraft::new("page", 100.0, 100.0), At::End)?;
-                edit.add_analysis_region::<TextRegion>(
-                    id,
+                let page = edit.add_page(PageDraft::new("page", 100.0, 100.0), At::End)?;
+                let region = edit.add_analysis_region::<TextRegion>(
+                    page,
                     At::End,
                     &Geometry::rectangle(10.0, 10.0, 20.0, 20.0),
                     None,
                 )?;
-                page = Some(id);
+                let (layer, _) = text_element(edit, page, region)?;
+                ids = Some((page, layer));
                 Ok(())
             })
             .unwrap();
         let snapshot = session.commit(patch).await.unwrap().snapshot;
-        let page = page.unwrap();
+        let (page, layer) = ids.unwrap();
         let input = StageInput::new(
             snapshot,
             page,
@@ -1935,7 +1989,10 @@ mod tests {
             koharu_ml::Device::cpu(),
         );
 
-        assert!(processor.skip(&input).unwrap());
+        assert_eq!(
+            processor.skip(&input).unwrap(),
+            Some(format!("the area overlaps text element {layer}"))
+        );
     }
 
     #[tokio::test]
@@ -1959,23 +2016,24 @@ mod tests {
                     None,
                 )?;
                 edit.relate::<Inside>(text, occupied)?;
+                let element = text_element(edit, page, text)?;
                 edit.add_analysis_region::<BubbleRegion>(
                     page,
                     At::End,
                     &Geometry::rectangle(200.0, 0.0, 100.0, 100.0),
                     None,
                 )?;
-                ids = Some(page);
+                ids = Some((page, occupied, element));
                 Ok(())
             })
             .unwrap();
         let snapshot = session.commit(patch).await.unwrap().snapshot;
-        let page = ids.unwrap();
+        let (page, occupied, (layer, content)) = ids.unwrap();
         let processor = Processor::new(
             DetectionModel::KoharuLayoutRFDetrSeg2XL(KoharuLayoutRFDetrSeg2XLConfig::default()),
             koharu_ml::Device::cpu(),
         );
-        let skips = |x: f64| {
+        let skips = |snapshot: &koharu_scene::Snapshot, x: f64| {
             processor
                 .skip(&StageInput::new(
                     snapshot.clone(),
@@ -1994,10 +2052,26 @@ mod tests {
         };
 
         // The area misses the text itself but would replace the bubble it sits in.
-        assert!(skips(10.0));
+        assert_eq!(
+            skips(&snapshot, 10.0),
+            Some(format!(
+                "bubble {occupied} already holds text element {layer}"
+            ))
+        );
         // An empty bubble and blank artwork can be detected again.
-        assert!(!skips(210.0));
-        assert!(!skips(130.0));
+        assert_eq!(skips(&snapshot, 210.0), None);
+        assert_eq!(skips(&snapshot, 130.0), None);
+
+        // Once its text element is deleted, the bubble can be detected again,
+        // though its old text region is still there (#03).
+        let patch = snapshot
+            .patch(|edit| {
+                edit.remove_entity(layer, RemovePolicy::Cascade)?;
+                edit.remove_entity(content, RemovePolicy::Cascade)
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        assert_eq!(skips(&snapshot, 10.0), None);
     }
 
     #[tokio::test]

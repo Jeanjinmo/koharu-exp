@@ -9,8 +9,8 @@ use futures::{StreamExt as _, stream::FuturesUnordered};
 use koharu_scene::{EntityId, Snapshot};
 
 use crate::{
-    Committer, ErrorKind, PipelineError, Progress, ProgressSink, Report, Request, RunStatus, Stage,
-    StageOutput, StopToken,
+    Committer, ErrorKind, PipelineError, Progress, ProgressSink, Report, Request, RunStatus,
+    SkippedStage, Stage, StageOutput, StopToken,
     images::ImageCache,
     progress,
     resources::ResourceMonitor,
@@ -36,6 +36,7 @@ pub(crate) struct Execution<'a> {
     base: koharu_scene::Revision,
     started: Instant,
     inpainting_mask: Option<crate::InpaintingMask>,
+    skipped: Vec<SkippedStage>,
 }
 
 impl<'a> Execution<'a> {
@@ -88,6 +89,7 @@ impl<'a> Execution<'a> {
             base,
             started,
             inpainting_mask: request.inpainting_mask,
+            skipped: Vec::new(),
         })
     }
 
@@ -163,7 +165,16 @@ impl<'a> Execution<'a> {
         } = completion;
         match outcome? {
             StageOutcome::Stopped => {}
-            StageOutcome::Skipped => {
+            StageOutcome::Skipped(reason) => {
+                self.skipped.push(SkippedStage {
+                    page,
+                    stage,
+                    reason,
+                });
+                self.mark_complete(page, stage);
+                progress::emit(self.progress.as_ref(), Progress::Skipped { page, stage });
+            }
+            StageOutcome::Unchanged => {
                 self.mark_complete(page, stage);
                 progress::emit(self.progress.as_ref(), Progress::Skipped { page, stage });
             }
@@ -258,6 +269,7 @@ impl<'a> Execution<'a> {
             completed: self.completed,
             total: self.scheduler.total(),
             elapsed: self.started.elapsed(),
+            skipped: self.skipped.clone(),
         }
     }
 }

@@ -66,8 +66,8 @@ impl StageRunner {
                 },
             )
         })?;
-        if skip {
-            return Ok(StageOutcome::Skipped);
+        if let Some(reason) = skip {
+            return Ok(StageOutcome::Skipped(reason));
         }
         let permit = self.accelerator.acquire().await;
         if job.stop.stopped() {
@@ -130,7 +130,7 @@ impl StageRunner {
             .await
             .map(|patch| {
                 if patch.is_empty() {
-                    StageOutcome::Skipped
+                    StageOutcome::Unchanged
                 } else {
                     StageOutcome::Patch(patch)
                 }
@@ -200,7 +200,10 @@ impl StageJob {
 
 pub(crate) enum StageOutcome {
     Patch(Patch),
-    Skipped,
+    /// The stage did not run, for this reason.
+    Skipped(String),
+    /// The stage ran and found nothing to change.
+    Unchanged,
     Stopped,
 }
 

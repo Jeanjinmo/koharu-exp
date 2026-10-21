@@ -62,8 +62,9 @@ impl StageInput {
 #[async_trait]
 trait StageProcessor: Send + Sync {
     fn model(&self) -> &'static str;
-    fn skip(&self, _input: &StageInput) -> Result<bool> {
-        Ok(false)
+    /// Why the stage has nothing to do for `input`, when it has nothing to do.
+    fn skip(&self, _input: &StageInput) -> Result<Option<String>> {
+        Ok(None)
     }
     fn unload(&self) -> bool;
     async fn load(&self) -> Result<()>;
@@ -109,7 +110,7 @@ impl Stages {
         self.processor(stage).model()
     }
 
-    pub(crate) fn skip(&self, stage: Stage, input: &StageInput) -> Result<bool> {
+    pub(crate) fn skip(&self, stage: Stage, input: &StageInput) -> Result<Option<String>> {
         self.processor(stage).skip(input)
     }
 

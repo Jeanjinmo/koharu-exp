@@ -97,23 +97,25 @@ impl StageProcessor for Processor {
 
     // A page whose text all copies references that are already in place needs
     // no translator, so it is skipped before the model loads.
-    fn skip(&self, input: &StageInput) -> Result<bool> {
+    fn skip(&self, input: &StageInput) -> Result<Option<String>> {
         let targets = self.targets(input)?;
         if targets.is_empty() {
-            return Ok(false);
+            return Ok(None);
         }
         for target in targets {
             let Target::Copy { content, text } = target else {
-                return Ok(false);
+                return Ok(None);
             };
             let current = input.scene.component::<Translation>(content)?;
             if !current.is_some_and(|current| {
                 matches!(current.text.origin, Origin::User) || current.text.value == text
             }) {
-                return Ok(false);
+                return Ok(None);
             }
         }
-        Ok(true)
+        Ok(Some(
+            "every text already has its translation from its reference".to_owned(),
+        ))
     }
 
     fn unload(&self) -> bool {
@@ -324,12 +326,15 @@ mod tests {
             )
         };
 
-        assert!(!processor.skip(&input(session.snapshot())).unwrap());
+        assert_eq!(processor.skip(&input(session.snapshot())).unwrap(), None);
         let patch = processor.process(input(session.snapshot())).await.unwrap();
         let snapshot = session.commit(patch).await.unwrap().snapshot;
         let translation = snapshot.component::<Translation>(content).unwrap().unwrap();
         assert_eq!(translation.text.value, "WHERE?");
         assert_eq!(translation.language.unwrap().as_str(), "en-US");
-        assert!(processor.skip(&input(snapshot)).unwrap());
+        assert_eq!(
+            processor.skip(&input(snapshot)).unwrap().as_deref(),
+            Some("every text already has its translation from its reference")
+        );
     }
 }
