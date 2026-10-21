@@ -52,6 +52,13 @@ export interface Compare {
   /** Where the slider divides the page, from 0 (left edge) to 1 (right edge). */
   split: number
 }
+/**
+ * How the reference lies over the original while aligning: at its opacity,
+ * as the difference of the two, or each in its own color.
+ */
+export type TracingBlend = 'normal' | 'difference' | 'tint'
+export const tracingBlends: readonly TracingBlend[] = ['normal', 'difference', 'tint']
+
 /** Aligning a page's reference by hand, before the alignment is saved. */
 export interface Tracing {
   page: EntityId
@@ -60,6 +67,9 @@ export interface Tracing {
   /** Whether `placement` differs from the saved one. */
   changed: boolean
   opacity: number
+  blend: TracingBlend
+  /** The original and the reference take turns while a key is held. */
+  blinking: boolean
   /**
    * This session's own history of placements, oldest first. Undo and redo
    * walk it while aligning, so they never reach the project's history.
@@ -131,6 +141,8 @@ interface KoharuStore {
   undoTracing: () => void
   redoTracing: () => void
   setTracingOpacity: (opacity: number) => void
+  setTracingBlend: (blend: TracingBlend) => void
+  setTracingBlinking: (blinking: boolean) => void
   /** Ends aligning at once, dropping an unsaved alignment. */
   stopTracing: () => void
   /**
@@ -260,6 +272,8 @@ export const useKoharuStore = create<KoharuStore>()((set, get) => ({
               placement,
               changed: false,
               opacity: state.tracing?.opacity ?? TRACING_OPACITY,
+              blend: state.tracing?.blend ?? 'normal',
+              blinking: false,
               undo: [],
               redo: [],
               leaving: null,
@@ -315,6 +329,11 @@ export const useKoharuStore = create<KoharuStore>()((set, get) => ({
     set((state) => ({
       tracing: state.tracing && { ...state.tracing, opacity: Math.min(1, Math.max(0, opacity)) },
     })),
+  setTracingBlend: (blend) => set(({ tracing }) => ({ tracing: tracing && { ...tracing, blend } })),
+  setTracingBlinking: (blinking) =>
+    set(({ tracing }) =>
+      tracing && tracing.blinking !== blinking ? { tracing: { ...tracing, blinking } } : {},
+    ),
   stopTracing: () => set({ tracing: null }),
   leaveTracing: (after) => {
     const tracing = get().tracing

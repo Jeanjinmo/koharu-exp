@@ -1,14 +1,14 @@
 'use client'
 
 import { ChevronDown, ChevronUp, GripHorizontal, Minus, Plus, RotateCcw, X } from 'lucide-react'
-import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PlacedImage, placedRect, usePageImage } from '@/components/editor/Compare'
 import { useFloatingPanel } from '@/components/editor/useFloatingPanel'
 import { call } from '@/lib/backend'
 import { pagesKey, projectKey, refresh, usePages } from '@/lib/queries'
-import { TRACING_OPACITY, useKoharuStore } from '@/lib/store'
+import { TRACING_OPACITY, tracingBlends, useKoharuStore } from '@/lib/store'
 import { commands, type Page, type ReferencePlacement } from '@koharu/bridge/protocol'
 import {
   AlertDialog,
@@ -26,6 +26,13 @@ import { toast } from '@koharu/ui/components/toast'
 import { cn } from '@koharu/ui/lib/utils'
 
 const FILL: ReferencePlacement = { x: 0, y: 0, width: 1, height: 1 }
+/** How long each page shows while blinking, in milliseconds. */
+const BLINK_INTERVAL = 350
+// Color matrices for Tint, rows giving red, green, blue, and alpha. Dark ink
+// of the original turns cyan and that of the reference red, while paper stays
+// white; multiplied together, ink in the same place turns black.
+const CYAN_INK = '0.2126 0.7152 0.0722 0 0  0 0 0 0 1  0 0 0 0 1  0 0 0 1 0'
+const RED_INK = '0 0 0 0 1  0.2126 0.7152 0.0722 0 0  0.2126 0.7152 0.0722 0 0  0 0 0 1 0'
 
 /** Scales a placement by `factor` around a point given in page fractions. */
 function scaled(placement: ReferencePlacement, factor: number, x: number, y: number) {
@@ -71,12 +78,23 @@ export function TracingOverlay({ page }: { page: Page }) {
   // Alt+wheel steps closer together than this are one undo step.
   const lastWheel = useRef(Number.NEGATIVE_INFINITY)
   const surface = useRef<HTMLDivElement>(null)
+  const filters = useId()
+  // While blinking, whether the reference is the one shown.
+  const [referenceTurn, setReferenceTurn] = useState(true)
 
   // Focus the overlay when aligning starts, so the arrow keys nudge at once.
   const aligning = Boolean(active?.placement)
   useEffect(() => {
     if (aligning) surface.current?.focus()
   }, [active?.page, aligning])
+
+  const blinking = active?.blinking ?? false
+  useEffect(() => {
+    if (!blinking) return
+    setReferenceTurn(true)
+    const timer = window.setInterval(() => setReferenceTurn((turn) => !turn), BLINK_INTERVAL)
+    return () => window.clearInterval(timer)
+  }, [blinking])
 
   const placement = active?.placement
   if (!active || !placement) return null
@@ -109,6 +127,11 @@ export function TracingOverlay({ page }: { page: Page }) {
     )
   }
 
+  const rect = placedRect(placement, page.size)
+  // Blinking shows each page plainly in turn; otherwise the chosen view.
+  const blend = blinking ? 'normal' : active.blend
+  const tint = blend === 'tint'
+
   return (
     <div
       ref={surface}
@@ -116,7 +139,8 @@ export function TracingOverlay({ page }: { page: Page }) {
       role='application'
       aria-label={t('tracing.surface')}
       tabIndex={0}
-      className='absolute inset-0 z-10 cursor-move touch-none outline-none'
+      // Blending mixes the two pages only, never the canvas underneath.
+      className='absolute inset-0 isolate z-10 cursor-move touch-none outline-none'
       onKeyDown={nudge}
       onPointerDown={(event) => {
         if (event.button !== 0) return
@@ -169,23 +193,51 @@ export function TracingOverlay({ page }: { page: Page }) {
         lastWheel.current = event.timeStamp
       }}
     >
+      {tint && (
+        <svg aria-hidden className='absolute size-0'>
+          <filter id={`${filters}-original`} colorInterpolationFilters='sRGB'>
+            <feColorMatrix type='matrix' values={CYAN_INK} />
+          </filter>
+          <filter id={`${filters}-reference`} colorInterpolationFilters='sRGB'>
+            <feColorMatrix type='matrix' values={RED_INK} />
+          </filter>
+        </svg>
+      )}
       {source && (
         <PlacedImage
           url={source}
           rect={{ x: 0, y: 0, width: page.size.width, height: page.size.height }}
           camera={camera}
           label={t('compare.original')}
+          filter={tint ? `url(#${filters}-original)` : undefined}
         />
       )}
-      {reference && (
+      {reference && (!blinking || referenceTurn) && (
         <PlacedImage
           url={reference}
-          rect={placedRect(placement, page.size)}
+          rect={rect}
           camera={camera}
           label={t('compare.reference')}
-          opacity={active.opacity}
+          opacity={blend === 'normal' && !blinking ? active.opacity : 1}
+          blend={blend === 'difference' ? 'difference' : tint ? 'multiply' : undefined}
+          filter={tint ? `url(#${filters}-reference)` : undefined}
         />
       )}
+      {/* The reference's edge stays visible even where both pages are white. */}
+      <div
+        data-testid='reference-outline'
+        className='pointer-events-none absolute border-2 border-dashed border-fuchsia-500'
+        style={{
+          left: (camera.translation[0] + rect.x * camera.zoom) / dpr,
+          top: (camera.translation[1] + rect.y * camera.zoom) / dpr,
+          width: (rect.width * camera.zoom) / dpr,
+          height: (rect.height * camera.zoom) / dpr,
+        }}
+      >
+        <span className='absolute top-0 left-0 bg-fuchsia-500 px-1 text-[10px] leading-4 font-medium text-white'>
+          {t('compare.reference')}
+        </span>
+      </div>
     </div>
   )
 }
@@ -200,6 +252,8 @@ export function TracingPanel({ page }: { page: Page }) {
   const tracing = useKoharuStore((state) => state.tracing)
   const moveTracing = useKoharuStore((state) => state.moveTracing)
   const setOpacity = useKoharuStore((state) => state.setTracingOpacity)
+  const setBlend = useKoharuStore((state) => state.setTracingBlend)
+  const compareKey = useKoharuStore((state) => state.shortcuts.compare)
   const stopTracing = useKoharuStore((state) => state.stopTracing)
   const leaveTracing = useKoharuStore((state) => state.leaveTracing)
   const stayTracing = useKoharuStore((state) => state.stayTracing)
@@ -223,6 +277,9 @@ export function TracingPanel({ page }: { page: Page }) {
   if (!tracing || tracing.page !== page.id) return null
   const placement = tracing.placement
   const rect = placement && placedRect(placement, page.size)
+  // Difference and Tint turn matching ink black only at the reference's full
+  // strength, so opacity is for Normal alone.
+  const fullStrength = tracing.blend !== 'normal'
 
   // This page and every later one with a reference, counted before Save is
   // chosen so its label can say how far it reaches.
@@ -333,6 +390,32 @@ export function TracingPanel({ page }: { page: Page }) {
         <>
           <div className='flex flex-wrap items-end gap-2'>
             <div className='grid gap-0.5'>
+              <span className='text-[10px] text-muted-foreground'>{t('tracing.view')}</span>
+              <div
+                role='group'
+                aria-label={t('tracing.view')}
+                className='flex h-6 items-center gap-0.5 rounded-lg border border-input bg-background p-0.5'
+              >
+                {tracingBlends.map((blend) => (
+                  <Button
+                    key={blend}
+                    type='button'
+                    size='xs'
+                    variant={tracing.blend === blend ? 'default' : 'ghost'}
+                    aria-pressed={tracing.blend === blend}
+                    title={t(`tracing.blends.${blend}Hint`)}
+                    className={cn(
+                      'h-full px-1.5 text-[10px]',
+                      tracing.blend !== blend && 'text-muted-foreground hover:text-foreground',
+                    )}
+                    onClick={() => setBlend(blend)}
+                  >
+                    {t(`tracing.blends.${blend}`)}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className='grid gap-0.5'>
               <span className='text-[10px] text-muted-foreground'>{t('tracing.opacity')}</span>
               <div className='flex items-center gap-1'>
                 <input
@@ -340,14 +423,19 @@ export function TracingPanel({ page }: { page: Page }) {
                   min={10}
                   max={90}
                   aria-label={t('tracing.opacity')}
-                  title={t('tracing.opacityHint', { percent: TRACING_OPACITY * 100 })}
+                  title={
+                    fullStrength
+                      ? t('tracing.blends.fullStrength')
+                      : t('tracing.opacityHint', { percent: TRACING_OPACITY * 100 })
+                  }
+                  disabled={fullStrength}
                   value={Math.round(tracing.opacity * 100)}
-                  className='h-6 w-24 accent-primary'
+                  className='h-6 w-24 accent-primary disabled:opacity-40'
                   onChange={(event) => setOpacity(event.currentTarget.valueAsNumber / 100)}
                   onDoubleClick={() => setOpacity(TRACING_OPACITY)}
                 />
                 <span className='w-8 text-right tabular-nums'>
-                  {Math.round(tracing.opacity * 100)}%
+                  {fullStrength ? 100 : Math.round(tracing.opacity * 100)}%
                 </span>
                 <Button
                   type='button'
@@ -355,7 +443,7 @@ export function TracingPanel({ page }: { page: Page }) {
                   variant='ghost'
                   aria-label={t('tracing.resetOpacity', { percent: TRACING_OPACITY * 100 })}
                   title={t('tracing.resetOpacity', { percent: TRACING_OPACITY * 100 })}
-                  disabled={tracing.opacity === TRACING_OPACITY}
+                  disabled={fullStrength || tracing.opacity === TRACING_OPACITY}
                   onClick={() => setOpacity(TRACING_OPACITY)}
                 >
                   <RotateCcw />
@@ -408,7 +496,9 @@ export function TracingPanel({ page }: { page: Page }) {
             {field('width')}
             {field('height')}
           </div>
-          <p className='text-[10px] text-muted-foreground'>{t('tracing.hint')}</p>
+          <p className='text-[10px] text-muted-foreground'>
+            {t('tracing.hint', { key: compareKey.toUpperCase() })}
+          </p>
           <div className='flex flex-wrap gap-1.5'>
             <Button
               type='button'

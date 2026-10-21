@@ -759,11 +759,20 @@
   },
   "tracing": {
     "align": "Align reference…",
+    "blends": {
+      "difference": "Difference",
+      "differenceHint": "What matches turns black; whatever is off glows",
+      "fullStrength": "Difference and Tint show the reference at full strength",
+      "normal": "Normal",
+      "normalHint": "The reference over the original at the opacity beside it",
+      "tint": "Tint",
+      "tintHint": "The original's lines in cyan, the reference's in red; lines that match turn black"
+    },
     "close": "Close alignment",
     "discard": "Discard",
     "grow": "Enlarge the reference",
     "height": "Height",
-    "hint": "Drag to move. Alt+wheel resizes around the pointer; arrow keys nudge (Shift for 10 px). Positions are page pixels. Switching pages saves this page's alignment.",
+    "hint": "Drag to move. Alt+wheel resizes around the pointer; arrow keys nudge (Shift for 10 px). Hold {{key}} to blink between the original and the reference. Positions are page pixels. Switching pages saves this page's alignment.",
     "keepAligning": "Keep aligning",
     "leaveDescription": "The reference of {{page}} was moved but not saved.",
     "leaveTitle": "Save this alignment?",
@@ -784,6 +793,7 @@
     "surface": "Reference alignment",
     "title": "Align reference",
     "toolsLocked": "Close Align reference first",
+    "view": "View",
     "width": "Width",
     "x": "X",
     "y": "Y"

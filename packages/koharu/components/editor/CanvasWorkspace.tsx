@@ -354,8 +354,9 @@ export function CanvasWorkspace() {
       }
       const command = event.ctrlKey || event.metaKey
       // While aligning a reference, keys act on the alignment only: undo and
-      // redo walk its own history, Escape leaves it, and canvas tools,
-      // selection, deleting, and Compare wait until it ends.
+      // redo walk its own history, Escape leaves it, holding the Compare key
+      // blinks between the original and the reference, and canvas tools,
+      // selection, and deleting wait until it ends.
       if (state.tracing) {
         if (command && event.key.toLowerCase() === 'z') {
           event.preventDefault()
@@ -365,6 +366,13 @@ export function CanvasWorkspace() {
           if (!state.tracing.leaving) state.leaveTracing()
         } else if (!command && event.key.toLowerCase() === state.shortcuts.fit) {
           requestCanvasFit()
+        } else if (
+          !command &&
+          !event.altKey &&
+          event.key.toLowerCase() === state.shortcuts.compare
+        ) {
+          event.preventDefault()
+          state.setTracingBlinking(true)
         }
         return
       }
@@ -427,14 +435,16 @@ export function CanvasWorkspace() {
       if (event.key === 'Alt') event.preventDefault()
       if (event.code === 'Space') spaceHeld.current = false
       const state = useKoharuStore.getState()
-      if (event.key.toLowerCase() === state.shortcuts.compare && state.compare.peeking) {
-        state.setComparePeeking(false)
+      if (event.key.toLowerCase() === state.shortcuts.compare) {
+        if (state.compare.peeking) state.setComparePeeking(false)
+        state.setTracingBlinking(false)
       }
     }
     const blur = () => {
       spaceHeld.current = false
       cancelGesture()
       useKoharuStore.getState().setComparePeeking(false)
+      useKoharuStore.getState().setTracingBlinking(false)
     }
 
     window.addEventListener('keydown', down)

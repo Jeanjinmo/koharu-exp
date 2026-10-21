@@ -361,6 +361,59 @@ describe('aligning safely', () => {
     })
   })
 
+  it('outlines the reference and shows it plainly, as a difference, or in color', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    act(() => useKoharuStore.getState().startTracing('one', shifted))
+    const reference = await screen.findByRole('img', { name: 'Reference' })
+    const original = screen.getByRole('img', { name: 'Original' })
+
+    // The camera is zoomed twice and moved by (40, 60) device pixels.
+    const outline = screen.getByTestId('reference-outline')
+    expect(outline).toHaveStyle({ left: '240px', top: '60px', width: '1600px', height: '3000px' })
+    expect(outline).toHaveTextContent('Reference')
+    expect(reference).toHaveStyle({ opacity: '0.5' })
+
+    const panel = screen.getByRole('region', { name: 'Align reference' })
+    await user.click(within(panel).getByRole('button', { name: 'Difference' }))
+    expect(reference).toHaveStyle({ mixBlendMode: 'difference', opacity: '1' })
+    expect(within(panel).getByRole('slider', { name: 'Reference opacity' })).toBeDisabled()
+
+    await user.click(within(panel).getByRole('button', { name: 'Tint' }))
+    expect(reference).toHaveStyle({ mixBlendMode: 'multiply', opacity: '1' })
+    expect(reference.style.filter).toMatch(/-reference/)
+    expect(original.style.filter).toMatch(/-original/)
+    expect(within(panel).getByRole('button', { name: 'Tint' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  })
+
+  it('blinks between the original and the reference while the Compare key is held', async () => {
+    renderEditor()
+    act(() => useKoharuStore.getState().startTracing('one', shifted))
+    const surface = await screen.findByRole('application', { name: 'Reference alignment' })
+    await screen.findByRole('img', { name: 'Reference' })
+    vi.useFakeTimers()
+    try {
+      fireEvent.keyDown(surface, { key: 'c' })
+      expect(screen.getByRole('img', { name: 'Reference' })).toHaveStyle({ opacity: '1' })
+      act(() => vi.advanceTimersByTime(350))
+      expect(screen.queryByRole('img', { name: 'Reference' })).not.toBeInTheDocument()
+      expect(screen.getByRole('img', { name: 'Original' })).toBeInTheDocument()
+      act(() => vi.advanceTimersByTime(350))
+      expect(screen.getByRole('img', { name: 'Reference' })).toBeInTheDocument()
+
+      fireEvent.keyUp(surface, { key: 'c' })
+      act(() => vi.advanceTimersByTime(700))
+      expect(screen.getByRole('img', { name: 'Reference' })).toHaveStyle({ opacity: '0.5' })
+      // The Compare key blinks instead of leaving the alignment.
+      expect(useKoharuStore.getState().tracing).toMatchObject({ page: 'one', blinking: false })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps the session when Align reference is chosen again', async () => {
     const user = userEvent.setup()
     renderEditor()

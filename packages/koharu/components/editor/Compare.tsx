@@ -109,12 +109,16 @@ export function PlacedImage({
   camera,
   label,
   opacity,
+  blend,
+  filter,
 }: {
   url: string
   rect: Rect
   camera: Camera
   label: string
   opacity?: number
+  blend?: 'difference' | 'multiply'
+  filter?: string
 }) {
   const dpr = window.devicePixelRatio
   const x = camera.translation[0] + rect.x * camera.zoom
@@ -130,6 +134,8 @@ export function PlacedImage({
         width: rect.width,
         height: rect.height,
         opacity,
+        mixBlendMode: blend,
+        filter,
         transform: `translate(${x / dpr}px, ${y / dpr}px) scale(${camera.zoom / dpr})`,
       }}
     />
