@@ -79,6 +79,7 @@ function show(page: string) {
 }
 
 beforeEach(() => {
+  window.localStorage.clear()
   queryClient.setQueryData(pagesKey, [
     summary('one', reference(shifted)),
     summary('two', null),
@@ -327,6 +328,37 @@ describe('aligning safely', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(useKoharuStore.getState().tracing).toBeNull()
     expect(save).not.toHaveBeenCalled()
+  })
+
+  it('folds the panel to its title bar and moves it by the title, keeping the alignment', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    act(() => {
+      useKoharuStore.getState().startTracing('one', shifted)
+      useKoharuStore.getState().moveTracing({ ...shifted, x: 0.2 })
+    })
+    const panel = await screen.findByRole('region', { name: 'Align reference' })
+
+    await user.click(within(panel).getByRole('button', { name: 'Collapse Align reference' }))
+    expect(within(panel).queryByRole('spinbutton', { name: 'X' })).not.toBeInTheDocument()
+    await user.click(within(panel).getByRole('button', { name: 'Expand Align reference' }))
+    expect(within(panel).getByRole('spinbutton', { name: 'X' })).toBeInTheDocument()
+
+    Object.defineProperty(panel.parentElement!, 'getBoundingClientRect', {
+      value: () => ({ x: 0, y: 0, left: 0, top: 0, width: 800, height: 600 }),
+    })
+    Object.defineProperty(panel, 'getBoundingClientRect', {
+      value: () => ({ x: 112, y: 8, left: 112, top: 8, width: 576, height: 180 }),
+    })
+    const title = within(panel).getByRole('heading', { name: /^Align reference/ })
+    fireEvent.pointerDown(title, { button: 0, pointerId: 3, clientX: 300, clientY: 20 })
+    fireEvent.pointerMove(title, { pointerId: 3, clientX: 250, clientY: 320 })
+    fireEvent.pointerUp(title, { pointerId: 3, clientX: 250, clientY: 320 })
+    expect(panel).toHaveStyle({ left: '62px', top: '308px' })
+    expect(useKoharuStore.getState().tracing).toMatchObject({
+      placement: { x: 0.2 },
+      changed: true,
+    })
   })
 
   it('keeps the session when Align reference is chosen again', async () => {

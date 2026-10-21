@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CanvasWorkspace } from '@/components/editor/CanvasWorkspace'
@@ -92,7 +92,26 @@ beforeEach(() => {
   prefetchCanvasPages.mockClear()
 })
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  window.localStorage.clear()
+})
+
+/** Lays a floating panel out at its styled place in a 800×600 canvas area. */
+function layOut(panel: HTMLElement, width: number, height: number) {
+  Object.defineProperty(panel.parentElement!, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({ x: 0, y: 0, left: 0, top: 0, width: 800, height: 600 }),
+  })
+  Object.defineProperty(panel, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => {
+      const left = Number.parseFloat(panel.style.left) || 12
+      const top = Number.parseFloat(panel.style.top) || 12
+      return { x: left, y: top, left, top, width, height }
+    },
+  })
+}
 
 function installProject() {
   const page = {
@@ -238,6 +257,49 @@ describe('canvas interaction adapter', () => {
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true })
     await waitFor(() => expect(redo).toHaveBeenCalledOnce())
     expect(undo).toHaveBeenCalledOnce()
+  })
+
+  it('moves and collapses the tools, remembers both, and puts them back on double-click', () => {
+    installProject()
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <CanvasWorkspace />
+        </TooltipProvider>
+      </QueryClientProvider>,
+    )
+    let tools = screen.getByRole('complementary', { name: 'Tools' })
+    layOut(tools, 44, 300)
+    const grip = within(tools).getByTitle('Drag to move. Double-click to put it back.')
+
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientX: 30, clientY: 15 })
+    fireEvent.pointerMove(grip, { pointerId: 1, clientX: 230, clientY: 115 })
+    fireEvent.pointerUp(grip, { pointerId: 1, clientX: 230, clientY: 115 })
+    expect(tools).toHaveStyle({ left: '212px', top: '112px' })
+
+    // The tools stop at the edge of the canvas area.
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 2, clientX: 230, clientY: 115 })
+    fireEvent.pointerMove(grip, { pointerId: 2, clientX: 2000, clientY: 2000 })
+    fireEvent.pointerUp(grip, { pointerId: 2, clientX: 2000, clientY: 2000 })
+    expect(tools).toHaveStyle({ left: '756px', top: '300px' })
+
+    fireEvent.click(within(tools).getByRole('button', { name: 'Collapse Tools' }))
+    expect(within(tools).queryByRole('button', { name: 'Text' })).not.toBeInTheDocument()
+
+    view.unmount()
+    renderWorkspace()
+    tools = screen.getByRole('complementary', { name: 'Tools' })
+    expect(tools).toHaveStyle({ left: '756px', top: '300px' })
+    expect(within(tools).queryByRole('button', { name: 'Text' })).not.toBeInTheDocument()
+    fireEvent.click(within(tools).getByRole('button', { name: 'Expand Tools' }))
+    expect(within(tools).getByRole('button', { name: 'Text' })).toBeInTheDocument()
+
+    fireEvent.doubleClick(within(tools).getByTitle('Drag to move. Double-click to put it back.'))
+    expect(tools.style.left).toBe('')
+    expect(JSON.parse(window.localStorage.getItem('koharu.panel.tools')!)).toEqual({
+      position: null,
+      collapsed: false,
+    })
   })
 
   it('announces WebGPU startup failures and offers recovery', () => {

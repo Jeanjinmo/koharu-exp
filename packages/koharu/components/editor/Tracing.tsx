@@ -1,10 +1,11 @@
 'use client'
 
-import { Minus, Plus, RotateCcw, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, GripHorizontal, Minus, Plus, RotateCcw, X } from 'lucide-react'
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PlacedImage, placedRect, usePageImage } from '@/components/editor/Compare'
+import { useFloatingPanel } from '@/components/editor/useFloatingPanel'
 import { call } from '@/lib/backend'
 import { pagesKey, projectKey, refresh, usePages } from '@/lib/queries'
 import { TRACING_OPACITY, useKoharuStore } from '@/lib/store'
@@ -22,6 +23,7 @@ import {
 import { Button } from '@koharu/ui/components/button'
 import { Input } from '@koharu/ui/components/input'
 import { toast } from '@koharu/ui/components/toast'
+import { cn } from '@koharu/ui/lib/utils'
 
 const FILL: ReferencePlacement = { x: 0, y: 0, width: 1, height: 1 }
 
@@ -203,6 +205,8 @@ export function TracingPanel({ page }: { page: Page }) {
   const stayTracing = useKoharuStore((state) => state.stayTracing)
   // The field being typed into; its keystrokes are one undo step.
   const typing = useRef<string | null>(null)
+  const floating = useFloatingPanel<HTMLElement>('tracing')
+  const name = t('tracing.title')
   const pages = usePages().data
   const index = pages?.findIndex((candidate) => candidate.id === page.id) ?? -1
   const saved = index >= 0 ? (pages?.[index]?.reference?.placement ?? null) : null
@@ -288,14 +292,33 @@ export function TracingPanel({ page }: { page: Page }) {
 
   return (
     <section
+      ref={floating.ref}
       data-canvas-control
-      aria-label={t('tracing.title')}
-      className='absolute top-2 left-1/2 z-20 grid w-[min(36rem,calc(100%-1rem))] -translate-x-1/2 gap-2 rounded-xl border border-border/70 bg-popover/95 p-2.5 text-[11px] shadow-lg backdrop-blur'
+      aria-label={name}
+      style={floating.style}
+      className={cn(
+        'absolute top-2 left-1/2 z-20 grid -translate-x-1/2 gap-2 rounded-xl border border-border/70 bg-popover/95 p-2.5 text-[11px] shadow-lg backdrop-blur',
+        floating.collapsed ? 'w-72 max-w-[calc(100%-1rem)]' : 'w-[min(36rem,calc(100%-1rem))]',
+      )}
     >
-      <header className='flex items-center gap-2'>
+      <header
+        {...floating.handle}
+        title={t('panel.move')}
+        className='flex cursor-grab touch-none items-center gap-2 active:cursor-grabbing'
+      >
+        <GripHorizontal className='size-3.5 shrink-0 text-muted-foreground/70' />
         <h2 className='min-w-0 flex-1 truncate text-[12px] font-semibold'>
-          {t('tracing.title')} · {page.label}
+          {name} · {page.label}
         </h2>
+        <Button
+          type='button'
+          size='icon-xs'
+          variant='ghost'
+          aria-label={t(floating.collapsed ? 'panel.expand' : 'panel.collapse', { name })}
+          onClick={floating.toggle}
+        >
+          {floating.collapsed ? <ChevronDown /> : <ChevronUp />}
+        </Button>
         <Button
           type='button'
           size='icon-xs'
@@ -306,7 +329,7 @@ export function TracingPanel({ page }: { page: Page }) {
           <X />
         </Button>
       </header>
-      {placement && rect ? (
+      {floating.collapsed ? null : placement && rect ? (
         <>
           <div className='flex flex-wrap items-end gap-2'>
             <div className='grid gap-0.5'>

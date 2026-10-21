@@ -2,7 +2,10 @@
 
 import {
   Brush,
+  ChevronDown,
+  ChevronUp,
   Eraser,
+  GripHorizontal,
   Hand,
   Minus,
   MousePointer2,
@@ -14,6 +17,7 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import { ColorWell } from '@/components/controls/ColorWell'
+import { useFloatingPanel } from '@/components/editor/useFloatingPanel'
 import { usePage } from '@/lib/queries'
 import {
   isBrushTool,
@@ -59,48 +63,76 @@ export function ToolBar() {
   const shortcuts = useKoharuStore((state) => state.shortcuts)
   // Tools wait while a reference is aligned, so a stray click cannot end it.
   const aligning = useKoharuStore((state) => state.tracing !== null)
-  const hasBrush = isBrushTool(active) && !aligning
+  const floating = useFloatingPanel<HTMLElement>('tools')
+  const hasBrush = isBrushTool(active) && !aligning && !floating.collapsed
+  const name = t('tools.title')
 
   return (
-    <aside className='absolute top-3 left-3 z-20 flex w-11 flex-col rounded-2xl border border-border bg-[var(--surface-floating)] p-1 shadow-[var(--shadow-toolrail)]'>
-      <div className='flex flex-col items-center py-0.5'>
-        {tools.map(([tool, Icon], index) => (
-          <div key={tool} className='contents'>
-            {index === tools.length - 1 && <span className='my-1 h-px w-5 bg-border' />}
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    size='icon'
-                    disabled={!page}
-                    aria-disabled={aligning || undefined}
-                    aria-label={t(`tools.${tool}`)}
-                    data-active={active === tool}
-                    className='relative text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:opacity-30 aria-disabled:hover:bg-transparent data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
-                    onClick={() => {
-                      if (!aligning) setTool(tool)
-                    }}
-                  />
-                }
-              >
-                <Icon className='size-4' />
-              </TooltipTrigger>
-              <TooltipContent side='right'>
-                {aligning ? (
-                  t('tracing.toolsLocked')
-                ) : (
-                  <>
-                    {t(`tools.${tool}`)}
-                    <span className='ml-2 opacity-60'>{shortcuts[tool].toUpperCase()}</span>
-                  </>
-                )}
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        ))}
+    <aside
+      ref={floating.ref}
+      aria-label={name}
+      style={floating.style}
+      className='absolute top-3 left-3 z-20 flex w-11 flex-col rounded-2xl border border-border bg-[var(--surface-floating)] p-1 shadow-[var(--shadow-toolrail)]'
+    >
+      <div className='flex flex-col items-center'>
+        <div
+          {...floating.handle}
+          title={t('panel.move')}
+          className='flex h-3.5 w-full cursor-grab touch-none items-center justify-center text-muted-foreground/70 active:cursor-grabbing'
+        >
+          <GripHorizontal className='size-3.5' />
+        </div>
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon-xs'
+          aria-label={t(floating.collapsed ? 'panel.expand' : 'panel.collapse', { name })}
+          className='text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground'
+          onClick={floating.toggle}
+        >
+          {floating.collapsed ? <ChevronDown /> : <ChevronUp />}
+        </Button>
       </div>
+      {!floating.collapsed && (
+        <div className='flex flex-col items-center py-0.5'>
+          {tools.map(([tool, Icon], index) => (
+            <div key={tool} className='contents'>
+              {index === tools.length - 1 && <span className='my-1 h-px w-5 bg-border' />}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='icon'
+                      disabled={!page}
+                      aria-disabled={aligning || undefined}
+                      aria-label={t(`tools.${tool}`)}
+                      data-active={active === tool}
+                      className='relative text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:opacity-30 aria-disabled:hover:bg-transparent data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
+                      onClick={() => {
+                        if (!aligning) setTool(tool)
+                      }}
+                    />
+                  }
+                >
+                  <Icon className='size-4' />
+                </TooltipTrigger>
+                <TooltipContent side='right'>
+                  {aligning ? (
+                    t('tracing.toolsLocked')
+                  ) : (
+                    <>
+                      {t(`tools.${tool}`)}
+                      <span className='ml-2 opacity-60'>{shortcuts[tool].toUpperCase()}</span>
+                    </>
+                  )}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          ))}
+        </div>
+      )}
 
       {hasBrush && (
         <div className='flex flex-col items-center gap-1 border-t border-border/80 py-1.5'>

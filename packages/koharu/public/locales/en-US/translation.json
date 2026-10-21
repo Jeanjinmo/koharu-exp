@@ -371,6 +371,11 @@
     "targetLanguage": "Target language",
     "title": "Translation output"
   },
+  "panel": {
+    "collapse": "Collapse {{name}}",
+    "expand": "Expand {{name}}",
+    "move": "Drag to move. Double-click to put it back."
+  },
   "phase": {
     "detection": "Detection",
     "inpainting": "Inpainting",
@@ -749,7 +754,8 @@
     "pan": "Pan",
     "remove": "Remove",
     "select": "Select",
-    "text": "Text"
+    "text": "Text",
+    "title": "Tools"
   },
   "tracing": {
     "align": "Align reference…",
