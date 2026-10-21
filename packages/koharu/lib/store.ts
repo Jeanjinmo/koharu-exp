@@ -17,6 +17,7 @@ import type {
   StartupState,
   ModelResources,
   ToolActivity,
+  UnfitText,
 } from '@koharu/bridge/protocol'
 import { toast } from '@koharu/ui/components/toast'
 
@@ -101,6 +102,8 @@ interface KoharuStore {
   canvasSize: [number, number]
   fitCanvasRequest: number
   layerFrames: Record<EntityId, Frame>
+  /** Text elements of the shown page whose layout does not fit, by element. */
+  unfitTexts: Record<EntityId, UnfitText>
   selectedLayers: EntityId[]
   selectedPages: EntityId[]
   tool: CanvasTool
@@ -217,6 +220,7 @@ export const useKoharuStore = create<KoharuStore>()((set, get) => ({
   canvasSize: [0, 0],
   fitCanvasRequest: 0,
   layerFrames: {},
+  unfitTexts: {},
   selectedLayers: [],
   selectedPages: [],
   tool: 'select',
@@ -420,6 +424,7 @@ export function receiveCanvas(canvas: CanvasState): void {
 export function receiveJob(job: Job): void {
   useKoharuStore.setState((state) => ({ jobs: { ...state.jobs, [job.id]: job } }))
   const summary = job.state === 'finished' ? job.summary : null
+  const unfit = summary && summary.unfit > 0 ? i18next.t('fit.count', { count: summary.unfit }) : ''
   if (summary?.kind === 'references') {
     const read = i18next.t('references.readCount', { count: summary.read })
     const unmatched =
@@ -429,8 +434,11 @@ export function receiveJob(job: Job): void {
     toast.add({
       type: 'success',
       title: i18next.t('references.readTitle'),
-      description: [read, unmatched].filter(Boolean).join(' '),
+      description: [read, unmatched, unfit].filter(Boolean).join(' '),
     })
+  } else if (summary?.kind === 'translation' && unfit) {
+    // A translation that fits everywhere needs no notice.
+    toast.add({ type: 'warning', title: unfit, description: i18next.t('fit.marked') })
   }
 }
 
@@ -468,6 +476,7 @@ function canvasSnapshot(canvas: CanvasState) {
     layerFrames: Object.fromEntries(
       canvas.element_frames.map(({ element, frame }) => [element, frame]),
     ),
+    unfitTexts: Object.fromEntries(canvas.unfit_texts.map((text) => [text.element, text])),
   }
 }
 

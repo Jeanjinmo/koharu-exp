@@ -438,14 +438,14 @@ describe('reference import', () => {
         ...job,
         state: 'finished',
         completed: 1,
-        summary: { kind: 'references', read: 5, unmatched: 1, unused: 0 },
+        summary: { kind: 'references', read: 5, unmatched: 1, unused: 0, unfit: 2 },
       }),
     )
     expect(add).toHaveBeenCalledWith(
       expect.objectContaining({
         title: 'Extracted text from references',
         description:
-          '5 text areas got text from their reference. 1 found no match; it shows that in the Inspector.',
+          '5 text areas got text from their reference. 1 found no match; it shows that in the Inspector. 2 texts do not fit their frames.',
       }),
     )
   })

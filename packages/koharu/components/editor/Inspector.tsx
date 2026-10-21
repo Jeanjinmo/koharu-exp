@@ -19,6 +19,7 @@ import {
   Plus,
   RotateCcw,
   Trash2,
+  TriangleAlert,
   Type,
 } from 'lucide-react'
 import { type MouseEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
@@ -54,6 +55,7 @@ import {
   type Layer,
   type TextAlignment,
   type Typography,
+  type UnfitText,
   type WritingMode,
 } from '@koharu/bridge/protocol'
 import { Button } from '@koharu/ui/components/button'
@@ -681,6 +683,7 @@ function LayerRow({
   const name = localizedLayerName(layer, index, t)
   const detail = localizedLayerKind(layer, t)
   const Icon = layerIcon(layer)
+  const unfit = useKoharuStore((state) => state.unfitTexts[layer.id])
   return (
     <div className='group min-w-0 px-1 py-px' style={{ paddingLeft: `${depth * 10 + 4}px` }}>
       <div
@@ -728,6 +731,22 @@ function LayerRow({
                 <ArrowDown className='size-3' />
               </button>
             </div>
+          )}
+          {unfit && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    role='img'
+                    className='grid size-5 shrink-0 place-items-center text-destructive'
+                    aria-label={unfitProblem(unfit, t)}
+                  />
+                }
+              >
+                <TriangleAlert className='size-3.5' />
+              </TooltipTrigger>
+              <TooltipContent side='left'>{unfitProblem(unfit, t)}</TooltipContent>
+            </Tooltip>
           )}
           {!expanded && (
             <span className='w-7 shrink-0 text-right text-[9px] text-muted-foreground tabular-nums'>
@@ -779,6 +798,7 @@ function LayerRow({
 function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void }) {
   const { t } = useTranslation()
   const name = localizedLayerName(layer, 0, t)
+  const unfit = useKoharuStore((state) => state.unfitTexts[layer.id])
   const [opacity, setOpacity] = useState(layer.visibility.opacity * 100)
 
   useEffect(() => {
@@ -881,6 +901,12 @@ function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void 
               </Tooltip>
             )}
           </div>
+          {unfit && (
+            <p className='flex items-start gap-1 text-[10px] leading-3.5 text-destructive'>
+              <TriangleAlert className='mt-px size-3 shrink-0' />
+              {unfitProblem(unfit, t)}
+            </p>
+          )}
           <InspectorField label={t('inspector.source')}>
             <CommitTextarea
               data-testid={`edit-source-${layer.id}`}
@@ -958,6 +984,12 @@ function ReferenceField({ layer }: { layer: Extract<Layer, { type: 'text' }> }) 
       )}
     </InspectorField>
   )
+}
+
+/** Why a text's layout does not fit, as the canvas frames it in red. */
+function unfitProblem(unfit: UnfitText, t: TFunction) {
+  if (unfit.overflows && unfit.below_readable_size) return t('fit.both')
+  return unfit.overflows ? t('fit.overflows') : t('fit.small')
 }
 
 function InspectorField({ label, children }: { label: string; children: React.ReactNode }) {

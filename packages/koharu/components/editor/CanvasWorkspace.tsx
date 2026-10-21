@@ -108,6 +108,7 @@ export function CanvasWorkspace() {
   const canvasSize = useKoharuStore((state) => state.canvasSize)
   const fitCanvasRequest = useKoharuStore((state) => state.fitCanvasRequest)
   const layerFrames = useKoharuStore((state) => state.layerFrames)
+  const unfitTexts = useKoharuStore((state) => state.unfitTexts)
   const tool = useKoharuStore((state) => state.tool)
   const brush = useKoharuStore((state) => state.brush)
   const selected = useKoharuStore((state) => state.selectedLayers)
@@ -818,6 +819,7 @@ export function CanvasWorkspace() {
               selected={selected}
               hovered={hovered}
               frames={layerFrames}
+              unfit={unfitTexts}
               previews={previews}
               draft={draft}
               cursor={cursor}

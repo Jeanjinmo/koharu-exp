@@ -58,6 +58,8 @@ pub struct ReferenceReading {
     pub unmatched: u32,
     /// Texts found in references that matched nothing on their page.
     pub unused: u32,
+    /// Texts of the pages that do not fit once read, as the canvas marks them.
+    pub unfit: u32,
 }
 
 /// A text of a page.
@@ -143,6 +145,7 @@ pub(crate) async fn read_references(job: JobContext, pages: Vec<EntityId>) -> Re
     let pipeline = handle.state::<Pipeline>().inner().clone();
     let mut reading = ReferenceReading::default();
     let mut revisions = Vec::new();
+    let mut read = Vec::new();
     let total = pages.len();
     let result = async {
         for (index, page) in pages.into_iter().enumerate() {
@@ -164,6 +167,7 @@ pub(crate) async fn read_references(job: JobContext, pages: Vec<EntityId>) -> Re
             if let Some(revision) = commit(&handle, patch).await? {
                 revisions.push(revision);
             }
+            read.push(page);
         }
         Ok(RunStatus::Completed)
     }
@@ -175,6 +179,10 @@ pub(crate) async fn read_references(job: JobContext, pages: Vec<EntityId>) -> Re
         if let Some(project) = project.as_mut() {
             project.record(revisions);
         }
+    }
+    match job.unfit_texts(&read).await {
+        Ok(unfit) => reading.unfit = unfit,
+        Err(error) => tracing::warn!(%error, "could not count texts that do not fit"),
     }
     job.report(|progress| {
         progress.completed = total;
@@ -1027,7 +1035,7 @@ mod tests {
             ReferenceReading {
                 read: 1,
                 unmatched: 1,
-                unused: 0,
+                ..ReferenceReading::default()
             }
         );
         let snapshot = session.commit(patch).await.unwrap().snapshot;

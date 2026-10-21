@@ -83,6 +83,7 @@ beforeEach(() => {
     canvasSize: [0, 0],
     fitCanvasRequest: 0,
     layerFrames: {},
+    unfitTexts: {},
     selectedLayers: [],
     selectedPages: [],
     tool: 'select',

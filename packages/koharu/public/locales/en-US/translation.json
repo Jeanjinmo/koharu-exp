@@ -114,6 +114,14 @@
     "fatalTitle": "Koharu could not continue",
     "tryAgain": "Try again"
   },
+  "fit": {
+    "both": "The text runs past its frame even after shrinking below the readable size",
+    "count_one": "1 text does not fit its frame.",
+    "count_other": "{{count}} texts do not fit their frames.",
+    "marked": "They are framed in red on the canvas and marked in Layers.",
+    "overflows": "The text runs past its frame",
+    "small": "The text shrinks below the readable size to fit its frame"
+  },
   "fontPicker": {
     "activeFilterCount": "{{count}} active filters",
     "activeFilterCount_one": "{{count}} active filter",

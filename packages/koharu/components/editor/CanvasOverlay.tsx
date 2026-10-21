@@ -12,6 +12,7 @@ import type {
   Page,
   Point,
   TransformFrame,
+  UnfitText,
 } from '@koharu/bridge/protocol'
 
 interface CanvasOverlayProps {
@@ -20,6 +21,8 @@ interface CanvasOverlayProps {
   selected: EntityId[]
   hovered: EntityId | null
   frames: Readonly<Record<EntityId, Frame>>
+  /** Text elements whose layout does not fit, framed in red. */
+  unfit: Readonly<Record<EntityId, UnfitText>>
   previews: Readonly<Record<EntityId, Frame>>
   draft: Frame | null
   cursor: Point | null
@@ -36,6 +39,7 @@ export function CanvasOverlay({
   selected,
   hovered,
   frames,
+  unfit,
   previews,
   draft,
   cursor,
@@ -93,6 +97,7 @@ export function CanvasOverlay({
           <div
             key={layer.id}
             data-element={layer.id}
+            data-unfit={layer.id in unfit || undefined}
             className='absolute box-border bg-transparent'
             style={{
               left: position.left,
@@ -105,6 +110,9 @@ export function CanvasOverlay({
                 highlighted || (selected && multipleSelected)
                   ? '1px solid var(--canvas-selection)'
                   : undefined,
+              // Drawn outside the frame, so it shows beside a selection border.
+              outline: layer.id in unfit ? '2px solid var(--destructive)' : undefined,
+              outlineOffset: 1,
               opacity,
               willChange: selected ? 'left, top, width, height, transform' : undefined,
             }}

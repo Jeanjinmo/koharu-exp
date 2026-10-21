@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CanvasWorkspace } from '@/components/editor/CanvasWorkspace'
 import { pageKey, pagesKey, projectKey, queryClient } from '@/lib/queries'
-import { useKoharuStore } from '@/lib/store'
+import { receiveCanvas, useKoharuStore } from '@/lib/store'
 import { commands, type Layer } from '@koharu/bridge/protocol'
 import { TooltipProvider } from '@koharu/ui/components/tooltip'
 
@@ -354,6 +354,27 @@ describe('canvas interaction adapter', () => {
     expect(useKoharuStore.getState().selectedLayers).toEqual([])
     expect(useKoharuStore.getState().camera.zoom).toBe(1)
     expect(commit).not.toHaveBeenCalled()
+  })
+
+  it('frames in red the texts the canvas could not fit', () => {
+    installProject()
+    renderWorkspace()
+    act(() =>
+      receiveCanvas({
+        page: 'page',
+        revision: 1,
+        generation: 1,
+        size: [1000, 1000],
+        element_frames: [
+          { element: 'element', frame: { x: 10, y: 20, width: 100, height: 50, angle_degrees: 0 } },
+        ],
+        unfit_texts: [{ element: 'element', overflows: true, below_readable_size: false }],
+      }),
+    )
+
+    const frame = screen.getByTestId('canvas-overlay').querySelector('[data-element="element"]')
+    expect(frame).toHaveAttribute('data-unfit', 'true')
+    expect((frame as HTMLElement).style.outline).toMatch(/solid/)
   })
 
   it('announces WebGPU startup failures and offers recovery', () => {

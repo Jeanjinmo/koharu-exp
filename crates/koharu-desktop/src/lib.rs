@@ -4,7 +4,7 @@ use std::{collections::HashSet, future::Future, sync::Arc};
 
 use anyhow::{Context as _, Result, bail};
 use koharu_rasterizer::{Rasterizer, ResourceId};
-use koharu_renderer::{Frame as RenderedFrame, LayerKind, Renderer};
+use koharu_renderer::{Frame as RenderedFrame, LayerKind, RenderDiagnostic, Renderer};
 use koharu_scene::{Commit, EntityId, Geometry, Point, Revision, Snapshot};
 use parking_lot::{Mutex as SyncMutex, RwLock};
 use serde::{Deserialize, Serialize};
@@ -44,6 +44,48 @@ pub struct CanvasState {
     pub generation: u64,
     pub size: [u32; 2],
     pub element_frames: Vec<TransformFrame>,
+    /// Text elements of the shown page whose layout does not fit.
+    pub unfit_texts: Vec<UnfitText>,
+}
+
+/// A text element whose text runs past its frame, or had to shrink below the
+/// readable size to stay inside it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Type)]
+pub struct UnfitText {
+    pub element: EntityId,
+    pub overflows: bool,
+    pub below_readable_size: bool,
+}
+
+/// The text elements that a rendered page's layout could not fit, one entry
+/// each, in the order the renderer first reported them.
+#[must_use]
+pub fn unfit_texts(diagnostics: &[RenderDiagnostic]) -> Vec<UnfitText> {
+    let mut unfit = Vec::<UnfitText>::new();
+    for diagnostic in diagnostics {
+        let (element, overflows) = match diagnostic {
+            RenderDiagnostic::TextOverflow { entity, .. } => (*entity, true),
+            RenderDiagnostic::TextBelowReadableSize { entity, .. } => (*entity, false),
+            RenderDiagnostic::MissingAsset { .. } => continue,
+        };
+        let text = match unfit.iter().position(|text| text.element == element) {
+            Some(index) => &mut unfit[index],
+            None => {
+                unfit.push(UnfitText {
+                    element,
+                    overflows: false,
+                    below_readable_size: false,
+                });
+                unfit.last_mut().expect("just pushed")
+            }
+        };
+        if overflows {
+            text.overflows = true;
+        } else {
+            text.below_readable_size = true;
+        }
+    }
+    unfit
 }
 
 #[derive(Default)]
@@ -195,6 +237,7 @@ impl Desktop {
                 generation: presentation.generation,
                 size: [0, 0],
                 element_frames: Vec::new(),
+                unfit_texts: Vec::new(),
             };
         };
         let (width, height) = frame.size();
@@ -226,6 +269,7 @@ impl Desktop {
             generation: presentation.generation,
             size: [width, height],
             element_frames,
+            unfit_texts: unfit_texts(frame.diagnostics()),
         }
     }
 
@@ -544,9 +588,56 @@ fn transform_point([a, b, c, d, e, f]: [f64; 6], point: &Point) -> Point {
 mod tests {
     use std::{future::pending, sync::Arc, time::Duration};
 
+    use koharu_renderer::{RenderBounds, RenderDiagnostic};
+    use koharu_scene::EntityId;
     use tokio::{sync::Notify, time::timeout};
 
-    use super::Desktop;
+    use super::{Desktop, UnfitText, unfit_texts};
+
+    #[test]
+    fn unfit_texts_merge_what_each_element_was_reported_for() {
+        let (first, second, image) = (EntityId::new(), EntityId::new(), EntityId::new());
+        let overflow = |entity| RenderDiagnostic::TextOverflow {
+            entity,
+            available: RenderBounds::default(),
+            actual_width: 10.0,
+            actual_height: 10.0,
+            font_size: 8.0,
+        };
+        let diagnostics = [
+            overflow(first),
+            RenderDiagnostic::MissingAsset {
+                entity: image,
+                role: "source".to_owned(),
+            },
+            RenderDiagnostic::TextBelowReadableSize {
+                entity: second,
+                font_size: 6.0,
+                minimum_font_size: 9.0,
+            },
+            RenderDiagnostic::TextBelowReadableSize {
+                entity: first,
+                font_size: 6.0,
+                minimum_font_size: 9.0,
+            },
+        ];
+
+        assert_eq!(
+            unfit_texts(&diagnostics),
+            [
+                UnfitText {
+                    element: first,
+                    overflows: true,
+                    below_readable_size: true,
+                },
+                UnfitText {
+                    element: second,
+                    overflows: false,
+                    below_readable_size: true,
+                },
+            ]
+        );
+    }
 
     #[tokio::test]
     async fn newer_request_preempts_current_preparation_and_acquires_ownership() {

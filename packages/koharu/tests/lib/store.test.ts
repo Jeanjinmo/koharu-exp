@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { receiveDownload, useKoharuStore } from '@/lib/store'
+import { receiveCanvas, receiveDownload, receiveJob, useKoharuStore } from '@/lib/store'
+import type { Job } from '@koharu/bridge/protocol'
+import { toast } from '@koharu/ui/components/toast'
 
 describe('editor state', () => {
   it('retains failed downloads until they are dismissed', () => {
@@ -24,5 +26,44 @@ describe('editor state', () => {
 
   it('defaults paint brush color to pure white (#FFFFFF)', () => {
     expect(useKoharuStore.getState().brush.color).toBe('#FFFFFF')
+  })
+
+  it('keeps the texts of the shown page that do not fit, by element', () => {
+    receiveCanvas({
+      page: 'page',
+      revision: 3,
+      generation: 2,
+      size: [1000, 1500],
+      element_frames: [],
+      unfit_texts: [{ element: 'bubble', overflows: true, below_readable_size: false }],
+    })
+    expect(useKoharuStore.getState().unfitTexts).toEqual({
+      bubble: { element: 'bubble', overflows: true, below_readable_size: false },
+    })
+  })
+
+  it('says how many translated texts do not fit, and nothing when all fit', () => {
+    const add = vi.spyOn(toast, 'add')
+    const job = (unfit: number): Job => ({
+      id: `job-${unfit}`,
+      kind: 'pipeline',
+      state: 'finished',
+      completed: 2,
+      total: 2,
+      page: null,
+      stage: null,
+      model: null,
+      error: null,
+      summary: { kind: 'translation', unfit },
+    })
+
+    receiveJob(job(0))
+    expect(add).not.toHaveBeenCalled()
+    receiveJob(job(3))
+    expect(add).toHaveBeenCalledWith({
+      type: 'warning',
+      title: '3 texts do not fit their frames.',
+      description: 'They are framed in red on the canvas and marked in Layers.',
+    })
   })
 })

@@ -1,8 +1,8 @@
 use std::{collections::HashMap, fmt, future::Future, sync::Arc};
 
 use anyhow::{Context as _, Result};
-use koharu_pipeline::{Committer, Progress, RunStatus, StageOutput, StopToken};
-use koharu_scene::Snapshot;
+use koharu_pipeline::{Committer, Progress, RunStatus, Stage, StageOutput, StopToken};
+use koharu_scene::{EntityId, Snapshot};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -60,6 +60,14 @@ pub struct Job {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JobSummary {
     References(ReferenceReading),
+    /// A run that included Translation.
+    Translation(TranslationSummary),
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Type)]
+pub struct TranslationSummary {
+    /// Texts of the run's pages that do not fit, as the canvas marks them.
+    pub unfit: u32,
 }
 
 /// What a job does, so its progress can say so between pipeline stages.
@@ -105,6 +113,30 @@ impl JobContext {
         &self.handle
     }
 
+    /// Counts the text elements of `pages` whose text does not fit, laid out
+    /// as the canvas shows them. Pages deleted meanwhile count nothing.
+    pub(crate) async fn unfit_texts(&self, pages: &[EntityId]) -> Result<u32> {
+        let snapshot = self
+            .handle
+            .state::<CurrentProject>()
+            .project
+            .lock()
+            .await
+            .as_ref()
+            .context("no project is open")?
+            .snapshot();
+        let renderer = self.handle.state::<Desktop>().renderer();
+        let mut unfit = 0;
+        for page in pages {
+            if snapshot.page(*page).is_err() {
+                continue;
+            }
+            let frame = renderer.render(&snapshot, *page).await?;
+            unfit += koharu_desktop::unfit_texts(frame.diagnostics()).len();
+        }
+        Ok(u32::try_from(unfit).unwrap_or(u32::MAX))
+    }
+
     /// Updates the job's progress and tells the UI.
     pub(crate) fn report(&self, update: impl FnOnce(&mut Job)) {
         let job = {
@@ -130,7 +162,10 @@ impl JobContext {
         inpainting_mask: Option<koharu_pipeline::InpaintingMask>,
     ) -> Result<RunStatus> {
         let progress = Arc::new(Mutex::new((0_usize, 0_usize)));
+        // The pages and stages of the run, once it has started.
+        let started = Arc::new(Mutex::new(None::<(Vec<EntityId>, Vec<Stage>)>));
         let context = self.clone();
+        let run = started.clone();
         let mut request = koharu_pipeline::Request {
             operation,
             scope,
@@ -147,6 +182,7 @@ impl JobContext {
                         page_count = pages.len(),
                         stage_count = stages.len(),
                     );
+                    *run.lock() = Some((pages.clone(), stages.clone()));
                     let mut progress = progress.lock();
                     *progress = (0, pages.len().saturating_mul(stages.len()));
                     Some((0, progress.1, None, None, None))
@@ -228,13 +264,26 @@ impl JobContext {
                 Err(_) => "failed",
             },
         );
-        match result {
-            Ok(report) => Ok(report.status),
+        let report = match result {
+            Ok(report) => report,
             Err(error) => {
                 tracing::error!(stage = ?error.stage, %error, "processing failed");
-                Err(anyhow::anyhow!(error))
+                return Err(anyhow::anyhow!(error));
+            }
+        };
+        // Translated text may not fit its bubble; a finished run says how often.
+        let translated = started.lock().take().filter(|(_, stages)| {
+            report.status == RunStatus::Completed && stages.contains(&Stage::Translation)
+        });
+        if let Some((pages, _)) = translated {
+            match self.unfit_texts(&pages).await {
+                Ok(unfit) => self.report(|job| {
+                    job.summary = Some(JobSummary::Translation(TranslationSummary { unfit }));
+                }),
+                Err(error) => tracing::warn!(%error, "could not count texts that do not fit"),
             }
         }
+        Ok(report.status)
     }
 }
 

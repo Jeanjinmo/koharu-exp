@@ -73,6 +73,7 @@ const startupState = (): StartupState => ({
     generation: 0,
     size: [0, 0],
     element_frames: [],
+    unfit_texts: [],
   },
   mcp: {
     status: { state: 'running', url: 'http://127.0.0.1:47821/mcp', clients: 0 },

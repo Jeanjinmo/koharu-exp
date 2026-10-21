@@ -1045,6 +1045,18 @@ describe('greenfield editor', () => {
     expect(useKoharuStore.getState().selectedLayers).toEqual(['element'])
   })
 
+  it('marks a text that does not fit in Layers and in its editor', () => {
+    installProject()
+    useKoharuStore.setState({
+      unfitTexts: { element: { element: 'element', overflows: true, below_readable_size: true } },
+    })
+    render(<Inspector />)
+
+    const problem = 'The text runs past its frame even after shrinking below the readable size'
+    expect(screen.getByRole('img', { name: problem })).toBeInTheDocument()
+    expect(screen.getByText(problem)).toBeInTheDocument()
+  })
+
   it('resets a custom text frame to its automatic region', async () => {
     installProject()
     queryClient.setQueryData(pageKey, (page: { layers: Layer[] }) => ({

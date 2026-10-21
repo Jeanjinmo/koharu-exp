@@ -194,6 +194,8 @@ export type CanvasState = {
 	generation: number,
 	size: [number, number],
 	element_frames: TransformFrame[],
+	/**  Text elements of the shown page whose layout does not fit. */
+	unfit_texts: UnfitText[],
 };
 
 export type ClaudeConfig = Record<string, never>;
@@ -376,7 +378,11 @@ export type JobState = "running" | "finished" | "failed" | "stopped";
 
 export type JobSummary = {
 	kind: "references",
-} & ReferenceReading;
+} & ReferenceReading | 
+/**  A run that included Translation. */
+{
+	kind: "translation",
+} & TranslationSummary;
 
 export type KoharuLayoutRFDetrSeg2XLConfig = {
 	text_threshold?: number | null,
@@ -647,6 +653,8 @@ export type ReferenceReading = {
 	unmatched: number,
 	/**  Texts found in references that matched nothing on their page. */
 	unused: number,
+	/**  Texts of the pages that do not fit once read, as the canvas marks them. */
+	unfit: number,
 };
 
 export type ReferenceText = {
@@ -761,6 +769,11 @@ export type TranslationConfig = {
 	instructions: string | null,
 };
 
+export type TranslationSummary = {
+	/**  Texts of the run's pages that do not fit, as the canvas marks them. */
+	unfit: number,
+};
+
 export type TypesettingConfig = {
 	font_families?: string[],
 };
@@ -781,6 +794,16 @@ export type Typography = {
 export type TypographyUpdate = {
 	layer: EntityId,
 	typography: Typography,
+};
+
+/**
+ *  A text element whose text runs past its frame, or had to shrink below the
+ *  readable size to stay inside it.
+ */
+export type UnfitText = {
+	element: EntityId,
+	overflows: boolean,
+	below_readable_size: boolean,
 };
 
 /**  How much a tool depends on the model seeing images. */
