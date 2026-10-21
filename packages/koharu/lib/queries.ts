@@ -19,7 +19,7 @@ export const pageKey = ['page'] as const
 export const preparedPageKey = (page: string) => ['prepared-page', page] as const
 export const fontsKey = ['fonts'] as const
 
-const projectQuery = queryOptions({
+export const projectQuery = queryOptions({
   queryKey: projectKey,
   queryFn: () => call(commands.getProject),
 })

@@ -29,6 +29,7 @@ import {
   pagesKey,
   preparedPageKey,
   projectKey,
+  projectQuery,
   queryClient,
   refresh,
   usePage,
@@ -380,9 +381,15 @@ export function CanvasWorkspace() {
       }
       if (command && event.key.toLowerCase() === 'z') {
         event.preventDefault()
-        void call(event.shiftKey ? commands.redo : commands.undo)
-          .then(() => refresh(projectKey, pagesKey, pageKey))
-          .catch(() => undefined)
+        const redo = event.shiftKey
+        // Each press waits behind the edits and steps before it, so it reads
+        // the history they left; with nothing to step through it does nothing.
+        void enqueue(async () => {
+          const project = await queryClient.fetchQuery(projectQuery)
+          if (!(redo ? project?.can_redo : project?.can_undo)) return
+          await call(redo ? commands.redo : commands.undo)
+          await refresh(projectKey, pagesKey, pageKey)
+        }).catch(() => undefined)
         return
       }
       if (command && event.key.toLowerCase() === 'a' && page) {
@@ -438,7 +445,7 @@ export function CanvasWorkspace() {
       window.removeEventListener('keyup', up)
       window.removeEventListener('blur', blur)
     }
-  }, [cancelGesture, colorSampling, page, requestCanvasFit, selectLayers, setTool])
+  }, [cancelGesture, colorSampling, enqueue, page, requestCanvasFit, selectLayers, setTool])
 
   const clientPagePoint = (clientX: number, clientY: number) =>
     pagePoint(

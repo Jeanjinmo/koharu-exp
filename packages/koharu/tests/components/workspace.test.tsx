@@ -212,6 +212,34 @@ describe('canvas interaction adapter', () => {
     input.remove()
   })
 
+  it('steps through project history from the keyboard only while there is some', async () => {
+    installProject()
+    const undo = vi.spyOn(commands, 'undo').mockResolvedValue(null)
+    const redo = vi.spyOn(commands, 'redo').mockResolvedValue(null)
+    const project = vi.spyOn(commands, 'getProject')
+    vi.spyOn(commands, 'getPages').mockResolvedValue([])
+    vi.spyOn(commands, 'getPage').mockImplementation(async () => queryClient.getQueryData(pageKey)!)
+    renderWorkspace()
+
+    // An empty history, as after Free up disk space, keeps the keys quiet.
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true })
+    await act(async () => undefined)
+    expect(undo).not.toHaveBeenCalled()
+    expect(redo).not.toHaveBeenCalled()
+
+    // A second press made before the first step's refresh reads the history
+    // that step left, so one remaining step is undone once.
+    const info = { name: 'Book', revision: 2, active_page: 'page' }
+    queryClient.setQueryData(projectKey, { ...info, can_undo: true, can_redo: false })
+    project.mockResolvedValue({ ...info, can_undo: false, can_redo: true })
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(redo).toHaveBeenCalledOnce())
+    expect(undo).toHaveBeenCalledOnce()
+  })
+
   it('announces WebGPU startup failures and offers recovery', () => {
     installProject()
     canvasState.status = 'error'
