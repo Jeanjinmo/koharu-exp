@@ -5,6 +5,7 @@ import { ChevronDown, Columns2 } from 'lucide-react'
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { useMarqueeZoom } from '@/components/editor/useMarqueeZoom'
 import { call } from '@/lib/backend'
 import { clampCameraTranslation, wheelCamera } from '@/lib/camera'
 import type { Camera } from '@/lib/geometry'
@@ -151,8 +152,9 @@ export function ComparePane({ page }: { page: Page }) {
   const camera = useKoharuStore((state) => state.camera)
   const comparison = useComparison(page, true)
   const pan = useRef<{ pointer: number; x: number; y: number; translation: [number, number] }>(null)
+  const marquee = useMarqueeZoom(page.size)
 
-  const move = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const move = (event: ReactPointerEvent<HTMLElement>) => {
     const start = pan.current
     if (!start || start.pointer !== event.pointerId) return
     const bounds = event.currentTarget.getBoundingClientRect()
@@ -189,7 +191,7 @@ export function ComparePane({ page }: { page: Page }) {
         useKoharuStore.setState({ camera: { ...next, fitted: false } })
       }}
       onPointerDown={(event) => {
-        if (event.button > 1) return
+        if (event.button > 1 || marquee.start(event)) return
         event.currentTarget.setPointerCapture(event.pointerId)
         pan.current = {
           pointer: event.pointerId,
@@ -198,17 +200,22 @@ export function ComparePane({ page }: { page: Page }) {
           translation: useKoharuStore.getState().camera.translation,
         }
       }}
-      onPointerMove={move}
+      onPointerMove={(event) => {
+        if (!marquee.move(event)) move(event)
+      }}
       onPointerUp={(event) => {
+        if (marquee.end(event)) return
         pan.current = null
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId)
         }
       }}
       onPointerCancel={() => {
+        marquee.cancel()
         pan.current = null
       }}
     >
+      {marquee.box}
       {comparison.url && (
         <PlacedImage
           url={comparison.url}

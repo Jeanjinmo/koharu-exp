@@ -12,6 +12,7 @@ import { StatusBar } from '@/components/editor/StatusBar'
 import { ToolBar } from '@/components/editor/ToolBar'
 import { TracingOverlay, TracingPanel } from '@/components/editor/Tracing'
 import { useCanvas } from '@/components/editor/useCanvas'
+import { useMarqueeZoom } from '@/components/editor/useMarqueeZoom'
 import { call } from '@/lib/backend'
 import { clamp, clampCameraTranslation, containCamera, wheelCamera } from '@/lib/camera'
 import { expandLayerSelection } from '@/lib/document'
@@ -122,6 +123,12 @@ export function CanvasWorkspace() {
   const pageId = page?.id
   const pageWidth = canvasSize[0] || page?.size.width
   const pageHeight = canvasSize[1] || page?.size.height
+  const marquee = useMarqueeZoom(
+    pageWidth && pageHeight ? { width: pageWidth, height: pageHeight } : null,
+  )
+  // The selection with a layer added, or taken out when it is already in it.
+  const toggled = (layer: string) =>
+    selected.includes(layer) ? selected.filter((id) => id !== layer) : [...selected, layer]
   const activeRaster =
     selected.length === 1
       ? page?.layers.find((layer) => layer.id === selected[0] && layer.type === 'raster')
@@ -623,6 +630,7 @@ export function CanvasWorkspace() {
             if (event.target instanceof Element && event.target.closest('[data-canvas-control]'))
               return
             event.currentTarget.focus()
+            if (!spaceHeld.current && marquee.start(event)) return
             event.currentTarget.setPointerCapture(event.pointerId)
             const physical = clientPhysicalPoint(event.clientX, event.clientY)
             const point = clientPagePoint(event.clientX, event.clientY)
@@ -637,15 +645,14 @@ export function CanvasWorkspace() {
               }
             } else if (tool === 'select') {
               const target = hitTestLayers(page.layers, point, layerFrames)
-              const additive = event.shiftKey || event.ctrlKey || event.metaKey
+              // Ctrl+click toggles too, once its press turns out not to be a drag.
+              const additive = event.shiftKey
               if (!target) {
                 if (!additive) selectLayers([])
                 return
               }
               const next = additive
-                ? selected.includes(target.id)
-                  ? selected.filter((id) => id !== target.id)
-                  : [...selected, target.id]
+                ? toggled(target.id)
                 : selected.includes(target.id)
                   ? selected
                   : [target.id]
@@ -741,18 +748,28 @@ export function CanvasWorkspace() {
             event.preventDefault()
           }}
           onPointerMove={(event) => {
-            if (!page) return
+            if (!page || marquee.move(event)) return
             const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent]
             moveGesture(event.pointerId, coalesced.length ? coalesced : [event.nativeEvent])
           }}
           onPointerUp={(event) => {
+            const marqueed = marquee.end(event)
+            if (marqueed === 'click' && page && tool === 'select') {
+              const point = clientPagePoint(event.clientX, event.clientY)
+              const target = hitTestLayers(page.layers, point, layerFrames)
+              if (target) selectLayers(toggled(target.id))
+            }
+            if (marqueed) return
             moveGesture(event.pointerId, [event.nativeEvent])
             finishGesture()
             if (event.currentTarget.hasPointerCapture(event.pointerId)) {
               event.currentTarget.releasePointerCapture(event.pointerId)
             }
           }}
-          onPointerCancel={() => cancelGesture()}
+          onPointerCancel={() => {
+            marquee.cancel()
+            cancelGesture()
+          }}
           onPointerLeave={(event) => {
             if (!event.currentTarget.hasPointerCapture(event.pointerId)) {
               setHovered(null)
@@ -813,6 +830,7 @@ export function CanvasWorkspace() {
           )}
           {page && canvasState.status === 'ready' && <TracingOverlay page={page} />}
           {page && canvasState.status === 'ready' && <ReferencePickOverlay page={page} />}
+          {marquee.box}
           {page && <TracingPanel page={page} />}
           {page && canvasState.status === 'error' && (
             <div

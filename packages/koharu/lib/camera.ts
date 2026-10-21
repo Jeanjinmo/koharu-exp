@@ -1,5 +1,8 @@
 import type { Camera } from './geometry'
 
+const MIN_ZOOM = 0.02
+const MAX_ZOOM = 16
+
 export function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value))
 }
@@ -75,7 +78,7 @@ export function wheelCamera(
   let translation = current.translation
   if (input.ctrlKey) {
     const point = { x: (input.clientX - bounds.x) * dpr, y: (input.clientY - bounds.y) * dpr }
-    zoom = clamp(current.zoom * Math.exp(-input.deltaY * 0.0015), 0.02, 16)
+    zoom = clamp(current.zoom * Math.exp(-input.deltaY * 0.0015), MIN_ZOOM, MAX_ZOOM)
     const pageX = (point.x - current.translation[0]) / current.zoom
     const pageY = (point.y - current.translation[1]) / current.zoom
     translation = [point.x - pageX * zoom, point.y - pageY * zoom]
@@ -97,6 +100,42 @@ export function wheelCamera(
       pageHeight,
       bounds.width * dpr,
       bounds.height * dpr,
+      dpr,
+    ),
+  }
+}
+
+/**
+ * The camera that fills a viewport with a box dragged over it, given in CSS
+ * pixels from the viewport's top-left corner.
+ */
+export function boxCamera(
+  current: Camera,
+  box: { x: number; y: number; width: number; height: number },
+  viewport: { width: number; height: number },
+  pageWidth: number,
+  pageHeight: number,
+): Camera {
+  const dpr = window.devicePixelRatio
+  const zoom = clamp(
+    current.zoom * Math.min(viewport.width / box.width, viewport.height / box.height),
+    MIN_ZOOM,
+    MAX_ZOOM,
+  )
+  // The page point at the box's center moves to the viewport's center.
+  const pageX = ((box.x + box.width / 2) * dpr - current.translation[0]) / current.zoom
+  const pageY = ((box.y + box.height / 2) * dpr - current.translation[1]) / current.zoom
+  const width = viewport.width * dpr
+  const height = viewport.height * dpr
+  return {
+    zoom,
+    translation: clampCameraTranslation(
+      [width / 2 - pageX * zoom, height / 2 - pageY * zoom],
+      zoom,
+      pageWidth,
+      pageHeight,
+      width,
+      height,
       dpr,
     ),
   }

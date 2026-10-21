@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 
 import { PlacedImage, placedRect, usePageImage } from '@/components/editor/Compare'
 import { useFloatingPanel } from '@/components/editor/useFloatingPanel'
+import { useMarqueeZoom } from '@/components/editor/useMarqueeZoom'
 import { call } from '@/lib/backend'
 import { pagesKey, projectKey, refresh, usePages } from '@/lib/queries'
 import { TRACING_OPACITY, tracingBlends, useKoharuStore } from '@/lib/store'
@@ -79,6 +80,7 @@ export function TracingOverlay({ page }: { page: Page }) {
   const lastWheel = useRef(Number.NEGATIVE_INFINITY)
   const surface = useRef<HTMLDivElement>(null)
   const filters = useId()
+  const marquee = useMarqueeZoom(page.size)
   // While blinking, whether the reference is the one shown.
   const [referenceTurn, setReferenceTurn] = useState(true)
 
@@ -145,6 +147,7 @@ export function TracingOverlay({ page }: { page: Page }) {
       onPointerDown={(event) => {
         if (event.button !== 0) return
         event.currentTarget.focus()
+        if (marquee.start(event)) return
         event.currentTarget.setPointerCapture(event.pointerId)
         drag.current = {
           pointer: event.pointerId,
@@ -156,7 +159,7 @@ export function TracingOverlay({ page }: { page: Page }) {
       }}
       onPointerMove={(event) => {
         const start = drag.current
-        if (!start || start.pointer !== event.pointerId) return
+        if (marquee.move(event) || !start || start.pointer !== event.pointerId) return
         moveTracing(
           {
             ...start.placement,
@@ -168,12 +171,14 @@ export function TracingOverlay({ page }: { page: Page }) {
         start.moved = true
       }}
       onPointerUp={(event) => {
+        if (marquee.end(event)) return
         drag.current = null
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId)
         }
       }}
       onPointerCancel={() => {
+        marquee.cancel()
         drag.current = null
       }}
       onWheel={(event) => {
@@ -223,6 +228,7 @@ export function TracingOverlay({ page }: { page: Page }) {
           filter={tint ? `url(#${filters}-reference)` : undefined}
         />
       )}
+      {marquee.box}
       {/* The reference's edge stays visible even where both pages are white. */}
       <div
         data-testid='reference-outline'

@@ -302,6 +302,60 @@ describe('canvas interaction adapter', () => {
     })
   })
 
+  it('zooms to a box drawn with Ctrl+drag and keeps Ctrl+click for the selection', () => {
+    installProject()
+    const commit = vi.spyOn(commands, 'commitTransform').mockResolvedValue(2)
+    const surface = renderWorkspace()
+    act(() => useKoharuStore.setState({ camera: { zoom: 1, translation: [0, 0], fitted: false } }))
+
+    // The surface starts at (10, 20); the box spans (100, 100) to (300, 250).
+    fireEvent.pointerDown(surface, {
+      button: 0,
+      ctrlKey: true,
+      pointerId: 1,
+      clientX: 110,
+      clientY: 120,
+    })
+    fireEvent.pointerMove(surface, { ctrlKey: true, pointerId: 1, clientX: 310, clientY: 270 })
+    expect(screen.getByTestId('zoom-box')).toHaveStyle({
+      left: '100px',
+      top: '100px',
+      width: '200px',
+      height: '150px',
+    })
+    fireEvent.pointerUp(surface, { ctrlKey: true, pointerId: 1, clientX: 310, clientY: 270 })
+
+    expect(screen.queryByTestId('zoom-box')).not.toBeInTheDocument()
+    expect(useKoharuStore.getState().camera).toEqual({
+      zoom: 4,
+      translation: [-400, -400],
+      fitted: false,
+    })
+
+    // Back at zoom 1, over the image layer at page (10, 20)–(110, 70).
+    act(() => useKoharuStore.setState({ camera: { zoom: 1, translation: [0, 0], fitted: false } }))
+    fireEvent.pointerDown(surface, {
+      button: 0,
+      ctrlKey: true,
+      pointerId: 2,
+      clientX: 60,
+      clientY: 60,
+    })
+    fireEvent.pointerUp(surface, { ctrlKey: true, pointerId: 2, clientX: 61, clientY: 60 })
+    expect(useKoharuStore.getState().selectedLayers).toEqual(['element'])
+    fireEvent.pointerDown(surface, {
+      button: 0,
+      ctrlKey: true,
+      pointerId: 3,
+      clientX: 60,
+      clientY: 60,
+    })
+    fireEvent.pointerUp(surface, { ctrlKey: true, pointerId: 3, clientX: 60, clientY: 60 })
+    expect(useKoharuStore.getState().selectedLayers).toEqual([])
+    expect(useKoharuStore.getState().camera.zoom).toBe(1)
+    expect(commit).not.toHaveBeenCalled()
+  })
+
   it('announces WebGPU startup failures and offers recovery', () => {
     installProject()
     canvasState.status = 'error'

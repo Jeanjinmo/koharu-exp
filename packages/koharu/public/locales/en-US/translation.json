@@ -781,7 +781,7 @@
     "discard": "Discard",
     "grow": "Enlarge the reference",
     "height": "Height",
-    "hint": "Drag to move. Alt+wheel resizes around the pointer; arrow keys nudge (Shift for 10 px). Hold {{key}} to blink between the original and the reference. Positions are page pixels. Switching pages saves this page's alignment.",
+    "hint": "Drag to move. Alt+wheel resizes around the pointer; arrow keys nudge (Shift for 10 px). Ctrl+drag zooms to an area. Hold {{key}} to blink between the original and the reference. Positions are page pixels. Switching pages saves this page's alignment.",
     "keepAligning": "Keep aligning",
     "leaveDescription": "The reference of {{page}} was moved but not saved.",
     "leaveTitle": "Save this alignment?",

@@ -414,6 +414,33 @@ describe('aligning safely', () => {
     }
   })
 
+  it('zooms to a box drawn with Ctrl+drag while a plain drag still moves the reference', async () => {
+    renderEditor()
+    act(() => useKoharuStore.getState().startTracing('one', shifted))
+    const surface = await screen.findByRole('application', { name: 'Reference alignment' })
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      value: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+    })
+
+    fireEvent.pointerDown(surface, {
+      button: 0,
+      ctrlKey: true,
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    })
+    fireEvent.pointerMove(surface, { ctrlKey: true, pointerId: 1, clientX: 300, clientY: 250 })
+    fireEvent.pointerUp(surface, { ctrlKey: true, pointerId: 1, clientX: 300, clientY: 250 })
+
+    // Zoom 2 at (40, 60) becomes 8, with page (80, 57.5) in the middle.
+    expect(useKoharuStore.getState().camera).toEqual({
+      zoom: 8,
+      translation: [-240, -160],
+      fitted: false,
+    })
+    expect(useKoharuStore.getState().tracing).toMatchObject({ placement: shifted, changed: false })
+  })
+
   it('keeps the session when Align reference is chosen again', async () => {
     const user = userEvent.setup()
     renderEditor()

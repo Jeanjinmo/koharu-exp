@@ -117,6 +117,34 @@ describe('compare', () => {
     expect(useKoharuStore.getState().camera).toEqual(camera)
   })
 
+  it('zooms both halves to a box drawn with Ctrl+drag over the original', async () => {
+    renderWorkspace()
+    pressCompare()
+    await screen.findByRole('img', { name: 'Original' })
+    const pane = screen.getByRole('region', { name: 'Original' })
+    Object.defineProperty(pane, 'getBoundingClientRect', {
+      value: () => ({ x: 0, y: 0, width: 400, height: 600 }),
+    })
+
+    fireEvent.pointerDown(pane, {
+      button: 0,
+      ctrlKey: true,
+      pointerId: 1,
+      clientX: 50,
+      clientY: 50,
+    })
+    fireEvent.pointerMove(pane, { ctrlKey: true, pointerId: 1, clientX: 150, clientY: 200 })
+    expect(screen.getByTestId('zoom-box')).toHaveStyle({ width: '100px', height: '150px' })
+    fireEvent.pointerUp(pane, { ctrlKey: true, pointerId: 1, clientX: 150, clientY: 200 })
+
+    // Page (30, 32.5), the box's center, lands in the middle of the pane.
+    expect(useKoharuStore.getState().camera).toEqual({
+      zoom: 8,
+      translation: [-40, 40],
+      fitted: false,
+    })
+  })
+
   it('peeks at the original only while the shortcut is held and remembers the mode', async () => {
     useKoharuStore.getState().setCompareMode('peek')
     expect(window.localStorage.getItem('koharu.compare.mode')).toBe('peek')
