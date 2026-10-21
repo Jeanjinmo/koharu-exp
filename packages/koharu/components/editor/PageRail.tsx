@@ -14,7 +14,7 @@ import {
   Settings,
   Trash2,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ResourceMonitor } from '@/components/editor/ResourceMonitor'
@@ -138,21 +138,27 @@ export function PageRail() {
   const select = (index: number, additive: boolean, range: boolean) => {
     const page = pages[index]
     if (!page) return
+    // The selection changes at once and builds on the latest one, so a click
+    // made while the previous page is still being shown adds to it too.
+    const current = useKoharuStore.getState().selectedPages
     let next: string[]
     if (range && anchor.current !== null) {
       const start = Math.min(anchor.current, index)
       const end = Math.max(anchor.current, index)
       const rangeIds = pages.slice(start, end + 1).map((item) => item.id)
-      next = additive ? [...new Set([...selected, ...rangeIds])] : rangeIds
+      next = additive ? [...new Set([...current, ...rangeIds])] : rangeIds
     } else if (additive) {
-      next = selected.includes(page.id)
-        ? selected.filter((id) => id !== page.id)
-        : [...selected, page.id]
+      next = current.includes(page.id)
+        ? current.filter((id) => id !== page.id)
+        : [...current, page.id]
       anchor.current = index
     } else {
       next = [page.id]
       anchor.current = index
     }
+    selectPages(next)
+    // Taking a page out of the selection keeps the page that is shown.
+    if (!next.includes(page.id)) return
     const previousProject = queryClient.getQueryData<ProjectInfo | null>(projectKey)
     const previousPage = queryClient.getQueryData<Page | null>(pageKey)
     const prepared = queryClient.getQueryData<CanvasPagePreparation>(preparedPageKey(page.id))
@@ -164,7 +170,6 @@ export function PageRail() {
         queryClient.setQueryData(projectKey, { ...previousProject, active_page: page.id })
         queryClient.setQueryData(pageKey, prepared.page)
       }
-      selectPages(next)
       selectLayers([])
       void call(commands.selectPage, page.id)
         .then((selection) => {
@@ -526,6 +531,16 @@ function PageImportMenu({
   )
 }
 
+/**
+ * Whether a click on a page row is meant for the row itself. Clicks on its
+ * buttons are not, nor clicks in its menu, which React passes to the row
+ * although the menu is rendered elsewhere in the page.
+ */
+function fromRow(event: ReactMouseEvent<HTMLElement>) {
+  const target = event.target as Element
+  return event.currentTarget.contains(target) && !target.closest('button')
+}
+
 function PageItem({
   page,
   active,
@@ -576,10 +591,12 @@ function PageItem({
       onPointerEnter={onIntent}
       onFocus={onIntent}
       onClick={(event) => {
-        if ((event.target as HTMLElement).closest('button,[role="menuitem"]')) return
+        if (!fromRow(event)) return
         onSelect(event.ctrlKey || event.metaKey, event.shiftKey)
       }}
-      onDoubleClick={onRename}
+      onDoubleClick={(event) => {
+        if (fromRow(event)) onRename()
+      }}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={(event) => event.preventDefault()}
