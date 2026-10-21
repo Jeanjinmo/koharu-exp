@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::Cursor,
     sync::{Arc, Mutex},
 };
@@ -10,7 +10,11 @@ use image::{
     DynamicImage, GenericImageView as _, GrayImage, ImageBuffer, ImageFormat, Luma, Rgb, RgbImage,
     Rgba, RgbaImage,
 };
-use imageproc::region_labelling::{Connectivity, connected_components};
+use imageproc::{
+    distance_transform::Norm,
+    morphology::dilate,
+    region_labelling::{Connectivity, connected_components},
+};
 use koharu_ml::{
     aot_inpainting::AotInpainting,
     flux2_klein::{Flux2KleinInpaint, Flux2KleinInpaintOptions},
@@ -25,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::{StageInput, StageProcessor, finish, generation};
-use crate::{InpaintingModel, ModelCell};
+use crate::{Bounds, InpaintingModel, MaskArea, ModelCell};
 
 const PRODUCER: &str = "dev.koharu.pipeline.inpainting";
 
@@ -470,25 +474,31 @@ async fn prepare(input: &StageInput) -> Result<InpaintInput> {
     };
     let mut mask = GrayImage::new(source.width(), source.height());
     let mut text_mask = GrayImage::new(source.width(), source.height());
-    if let Some(transient) = &input.inpainting_mask {
-        let layer = image::load_from_memory(&transient.png)?.to_luma8();
-        if layer.dimensions() != mask.dimensions() {
-            bail!("inpainting mask dimensions do not match page {page}");
+    match input.inpainting_mask.as_ref().map(|manual| &manual.area) {
+        Some(MaskArea::Painted(png)) => {
+            let layer = image::load_from_memory(png)?.to_luma8();
+            if layer.dimensions() != mask.dimensions() {
+                bail!("inpainting mask dimensions do not match page {page}");
+            }
+            mask = layer;
         }
-        mask = layer;
-    } else {
-        for role in ["text-mask", "coo-mask"] {
-            if let Some(image) = input.images.get(&input.scene, page, role).await? {
-                let layer = image.to_luma8();
-                if layer.dimensions() != mask.dimensions() {
-                    bail!("{role} dimensions do not match page {page}");
+        area => {
+            for role in ["text-mask", "coo-mask"] {
+                if let Some(image) = input.images.get(&input.scene, page, role).await? {
+                    let layer = image.to_luma8();
+                    if layer.dimensions() != mask.dimensions() {
+                        bail!("{role} dimensions do not match page {page}");
+                    }
+                    for (target, source) in mask.iter_mut().zip(layer.as_raw()) {
+                        *target = (*target).max(*source);
+                    }
+                    if role == "text-mask" {
+                        text_mask = layer;
+                    }
                 }
-                for (target, source) in mask.iter_mut().zip(layer.as_raw()) {
-                    *target = (*target).max(*source);
-                }
-                if role == "text-mask" {
-                    text_mask = layer;
-                }
+            }
+            if let Some(MaskArea::Text(places)) = area {
+                (mask, text_mask) = text_places_mask(places, &mask, &text_mask);
             }
         }
     }
@@ -514,6 +524,143 @@ async fn prepare(input: &StageInput) -> Result<InpaintInput> {
         text_mask,
         flat_fill_regions,
     })
+}
+
+/// How far around a text's box detected text counts as touching it.
+const TEXT_GROW: f64 = 6.0;
+/// How far detected text touching a text's box may reach beyond it, when the
+/// text is in no bubble that bounds it.
+const TEXT_REACH: f64 = 24.0;
+/// Detected pixels this close belong to one glyph or line, so text only
+/// partly inside its box is still removed whole.
+const TEXT_JOIN: u8 = 4;
+
+/// Where one piece of text is on a page, for removing it as the pipeline
+/// does.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextPlace {
+    /// The text's box, in page pixels. Detected text that touches it, grown
+    /// by a few pixels, is removed whole.
+    pub bounds: Bounds,
+    /// The outline of the bubble holding the text, in page pixels; nothing
+    /// outside it changes.
+    pub bubble: Option<Vec<[f64; 2]>>,
+}
+
+impl TextPlace {
+    /// The part of the page that removing this text may change.
+    pub fn extent(&self) -> Bounds {
+        match self.bubble.as_deref() {
+            Some(points) if points.len() >= 3 => {
+                let (mut left, mut top) = (f64::INFINITY, f64::INFINITY);
+                let (mut right, mut bottom) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+                for [x, y] in points {
+                    left = left.min(*x);
+                    top = top.min(*y);
+                    right = right.max(*x);
+                    bottom = bottom.max(*y);
+                }
+                Bounds {
+                    x: left,
+                    y: top,
+                    width: right - left,
+                    height: bottom - top,
+                }
+            }
+            _ => grown(self.bounds, TEXT_REACH),
+        }
+    }
+
+    fn polygon(&self) -> Option<Vec<(f32, f32)>> {
+        self.bubble
+            .as_ref()
+            .filter(|points| points.len() >= 3)
+            .map(|points| points.iter().map(|[x, y]| (*x as f32, *y as f32)).collect())
+    }
+}
+
+fn grown(bounds: Bounds, by: f64) -> Bounds {
+    Bounds {
+        x: bounds.x - by,
+        y: bounds.y - by,
+        width: bounds.width + 2.0 * by,
+        height: bounds.height + 2.0 * by,
+    }
+}
+
+/// `[left, top, right, bottom]` of the whole pixels `bounds` touches on a
+/// `width` by `height` page, when it touches any.
+fn pixel_bounds(bounds: Bounds, width: u32, height: u32) -> Option<[u32; 4]> {
+    let clamp = |value: f64, limit: u32| value.clamp(0.0, f64::from(limit)) as u32;
+    let left = clamp(bounds.x.floor(), width);
+    let top = clamp(bounds.y.floor(), height);
+    let right = clamp((bounds.x + bounds.width).ceil(), width);
+    let bottom = clamp((bounds.y + bounds.height).ceil(), height);
+    (right > left && bottom > top).then_some([left, top, right, bottom])
+}
+
+/// The pixels removing `places` inpaints, and the detected text among them.
+/// Each place takes the detected text that touches its box, whole and inside
+/// its bubble; a place without detected text takes its grown box.
+fn text_places_mask(
+    places: &[TextPlace],
+    detected: &GrayImage,
+    text: &GrayImage,
+) -> (GrayImage, GrayImage) {
+    let (width, height) = detected.dimensions();
+    let mut mask = GrayImage::new(width, height);
+    for place in places {
+        let polygon = place.polygon();
+        let inside = |x: u32, y: u32| {
+            polygon
+                .as_deref()
+                .is_none_or(|polygon| point_in_polygon((x as f32 + 0.5, y as f32 + 0.5), polygon))
+        };
+        let (Some([left, top, right, bottom]), Some(seed)) = (
+            pixel_bounds(place.extent(), width, height),
+            pixel_bounds(grown(place.bounds, TEXT_GROW), width, height),
+        ) else {
+            continue;
+        };
+        let found = GrayImage::from_fn(right - left, bottom - top, |x, y| {
+            let (x, y) = (left + x, top + y);
+            Luma([u8::from(detected.get_pixel(x, y)[0] >= 127 && inside(x, y)) * u8::MAX])
+        });
+        let labels = connected_components(
+            &dilate(&found, Norm::LInf, TEXT_JOIN),
+            Connectivity::Eight,
+            Luma([0]),
+        );
+        let mut touching = BTreeSet::new();
+        for y in seed[1].max(top)..seed[3].min(bottom) {
+            for x in seed[0].max(left)..seed[2].min(right) {
+                let label = labels.get_pixel(x - left, y - top)[0];
+                if label != 0 {
+                    touching.insert(label);
+                }
+            }
+        }
+        let mut taken = false;
+        for (x, y, pixel) in found.enumerate_pixels() {
+            if pixel[0] != 0 && touching.contains(&labels.get_pixel(x, y)[0]) {
+                mask.put_pixel(left + x, top + y, Luma([u8::MAX]));
+                taken = true;
+            }
+        }
+        if !taken {
+            for y in seed[1]..seed[3] {
+                for x in seed[0]..seed[2] {
+                    if inside(x, y) {
+                        mask.put_pixel(x, y, Luma([u8::MAX]));
+                    }
+                }
+            }
+        }
+    }
+    let text = GrayImage::from_fn(width, height, |x, y| {
+        Luma([mask.get_pixel(x, y)[0].min(text.get_pixel(x, y)[0])])
+    });
+    (mask, text)
 }
 
 const TILE_SIZE: u32 = 512;
@@ -894,6 +1041,116 @@ fn composite_generated(
 mod tests {
     use super::*;
 
+    fn filled(mask: &mut GrayImage, [left, top, right, bottom]: [u32; 4]) {
+        for y in top..bottom {
+            for x in left..right {
+                mask.put_pixel(x, y, Luma([255]));
+            }
+        }
+    }
+
+    fn covered(mask: &GrayImage, [left, top, right, bottom]: [u32; 4]) -> bool {
+        (top..bottom).all(|y| (left..right).all(|x| mask.get_pixel(x, y)[0] == 255))
+    }
+
+    fn empty(mask: &GrayImage, [left, top, right, bottom]: [u32; 4]) -> bool {
+        (top..bottom).all(|y| (left..right).all(|x| mask.get_pixel(x, y)[0] == 0))
+    }
+
+    fn rectangle(left: f64, top: f64, right: f64, bottom: f64) -> Vec<[f64; 2]> {
+        vec![[left, top], [right, top], [right, bottom], [left, bottom]]
+    }
+
+    #[test]
+    fn element_removal_takes_whole_lines_of_detected_text_inside_the_bubble() {
+        let mut detected = GrayImage::new(200, 120);
+        // Two lines of glyphs in a bubble, the first mostly above the
+        // element's box, and text of the next bubble close by.
+        for glyph in 0..4 {
+            let left = 20 + glyph * 14;
+            filled(&mut detected, [left, 20, left + 10, 36]);
+            filled(&mut detected, [left, 44, left + 10, 60]);
+        }
+        filled(&mut detected, [130, 30, 150, 50]);
+        let place = TextPlace {
+            bounds: Bounds {
+                x: 20.0,
+                y: 34.0,
+                width: 52.0,
+                height: 26.0,
+            },
+            bubble: Some(rectangle(10.0, 10.0, 110.0, 80.0)),
+        };
+
+        let (mask, text) = text_places_mask(std::slice::from_ref(&place), &detected, &detected);
+
+        for glyph in 0..4 {
+            let left = 20 + glyph * 14;
+            assert!(
+                covered(&mask, [left, 20, left + 10, 36]),
+                "first line, glyph {glyph}"
+            );
+            assert!(
+                covered(&mask, [left, 44, left + 10, 60]),
+                "second line, glyph {glyph}"
+            );
+        }
+        assert!(empty(&mask, [130, 30, 150, 50]), "the next bubble's text");
+        assert!(empty(&mask, [0, 0, 200, 18]), "pixels around the text");
+        assert_eq!(mask, text);
+        assert_eq!(
+            place.extent(),
+            Bounds {
+                x: 10.0,
+                y: 10.0,
+                width: 100.0,
+                height: 70.0,
+            }
+        );
+    }
+
+    #[test]
+    fn element_removal_without_detected_text_takes_the_grown_box_inside_the_bubble() {
+        let detected = GrayImage::new(100, 100);
+        let place = TextPlace {
+            bounds: Bounds {
+                x: 30.0,
+                y: 30.0,
+                width: 20.0,
+                height: 10.0,
+            },
+            bubble: Some(rectangle(28.0, 0.0, 100.0, 100.0)),
+        };
+
+        let (mask, text) = text_places_mask(&[place], &detected, &detected);
+
+        assert!(covered(&mask, [28, 24, 56, 46]));
+        assert!(empty(&mask, [0, 0, 28, 100]), "outside the bubble");
+        assert!(empty(&mask, [56, 0, 100, 100]));
+        assert!(text.pixels().all(|pixel| pixel[0] == 0));
+    }
+
+    #[test]
+    fn free_text_removal_reaches_only_text_that_touches_its_box() {
+        let mut detected = GrayImage::new(160, 100);
+        filled(&mut detected, [20, 40, 70, 60]);
+        filled(&mut detected, [120, 40, 150, 60]);
+        let place = TextPlace {
+            bounds: Bounds {
+                x: 30.0,
+                y: 42.0,
+                width: 30.0,
+                height: 16.0,
+            },
+            bubble: None,
+        };
+
+        let (mask, _) = text_places_mask(&[place], &detected, &detected);
+
+        assert!(covered(&mask, [20, 40, 70, 60]));
+        assert!(empty(&mask, [120, 40, 150, 60]));
+    }
+
     #[tokio::test]
     async fn transient_inpainting_mask_replaces_persistent_page_masks() {
         let mut session = koharu_scene::Session::memory().await.unwrap();
@@ -943,7 +1200,7 @@ mod tests {
             Arc::new(crate::ImageCache::default()),
             Some(crate::InpaintingMask {
                 page,
-                png: encode(&DynamicImage::ImageLuma8(transient)),
+                area: MaskArea::Painted(encode(&DynamicImage::ImageLuma8(transient))),
             }),
         );
 
@@ -951,6 +1208,78 @@ mod tests {
         assert_eq!(prepared.mask.get_pixel(3, 4), &Luma([255]));
         assert_eq!(prepared.mask.get_pixel(0, 0), &Luma([0]));
         assert!(prepared.text_mask.pixels().all(|pixel| pixel[0] == 0));
+    }
+
+    #[tokio::test]
+    async fn removing_text_places_inpaints_their_detected_text_like_the_pipeline() {
+        let mut session = koharu_scene::Session::memory().await.unwrap();
+        let mut page = None;
+        let source = DynamicImage::new_rgb8(40, 40);
+        let mut detected = GrayImage::new(40, 40);
+        filled(&mut detected, [10, 10, 14, 30]);
+        filled(&mut detected, [30, 10, 34, 30]);
+        let encode = |image: &DynamicImage| {
+            let mut bytes = Cursor::new(Vec::new());
+            image.write_to(&mut bytes, ImageFormat::Png).unwrap();
+            Arc::<[u8]>::from(bytes.into_inner())
+        };
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                let id = edit.add_page(
+                    koharu_scene::PageDraft::new("page", 40.0, 40.0),
+                    koharu_scene::At::End,
+                )?;
+                for (role, image) in [
+                    ("source", source.clone()),
+                    ("text-mask", DynamicImage::ImageLuma8(detected.clone())),
+                ] {
+                    edit.set_asset(
+                        id,
+                        &AssetRole::new(role)?,
+                        AssetInput::new(
+                            encode(&image),
+                            "image/png",
+                            AssetMetadata {
+                                width: Some(40),
+                                height: Some(40),
+                                attributes: BTreeMap::new(),
+                            },
+                        ),
+                    )?;
+                }
+                page = Some(id);
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let page = page.unwrap();
+        let input = StageInput::new(
+            snapshot,
+            page,
+            None,
+            None,
+            Arc::new(crate::ImageCache::default()),
+            Some(crate::InpaintingMask {
+                page,
+                area: MaskArea::Text(vec![TextPlace {
+                    bounds: Bounds {
+                        x: 9.0,
+                        y: 12.0,
+                        width: 6.0,
+                        height: 10.0,
+                    },
+                    bubble: None,
+                }]),
+            }),
+        );
+
+        let prepared = prepare(&input).await.unwrap();
+        assert!(covered(&prepared.mask, [10, 10, 14, 30]));
+        assert!(empty(&prepared.mask, [30, 10, 34, 30]));
+        // The detected text stays known, so uniform bubbles fill flat as in
+        // the pipeline.
+        assert_eq!(prepared.text_mask, prepared.mask);
     }
 
     #[tokio::test]
@@ -1008,7 +1337,7 @@ mod tests {
             Arc::new(crate::ImageCache::default()),
             Some(crate::InpaintingMask {
                 page,
-                png: Arc::<[u8]>::from([]),
+                area: MaskArea::Painted(Arc::<[u8]>::from([])),
             }),
         );
         let processor = Processor::new(InpaintingModel::LaMa {}, koharu_ml::Device::cpu()).unwrap();

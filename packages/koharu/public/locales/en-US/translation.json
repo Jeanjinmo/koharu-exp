@@ -572,7 +572,7 @@
         "move_element": "Moves an element under another parent or to another place in the layer order. Can be undone. No vision needed.",
         "move_page": "Moves a page to another position in the project. Can be undone. No vision needed.",
         "read_glossary": "Reads the project glossary: each term and name with the translation it keeps and an optional note. Changes nothing. No vision needed.",
-        "remove": "Inpaints one area of a page, like the Remove brush, to clear original text. Only that area changes, and the result goes into the page's cleanup layer. Can be undone. Works without vision, but areas are more accurate when the model can see the page.",
+        "remove": "Inpaints one area of a page, like the Remove brush, to clear original text. Given text elements, it removes their detected text whole, as the pipeline does. Only that area changes, and the result goes into the page's cleanup layer. Can be undone. Works without vision, but areas are more accurate when the model can see the page.",
         "rename_page": "Changes a page's name in the page list. Can be undone. No vision needed.",
         "run_pipeline": "Runs Koharu's processing pipeline (detection, OCR, translation, inpainting) on the project, some pages, some elements, or one area. Its edits can be undone, and a long run stops when you use Stop now. No vision needed.",
         "set_geometry": "Replaces the outline of a text element on the page. Can be undone. Works without vision, but shapes are better when the model can see the page.",

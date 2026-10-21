@@ -7,13 +7,26 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::{ProgressSink, Scope, Stage};
+use crate::{ProgressSink, Scope, Stage, TextPlace};
 use koharu_scene::EntityId;
 
+/// A manual inpainting run on one page, in place of everything detection
+/// found on it.
 #[derive(Clone, Debug)]
 pub struct InpaintingMask {
     pub page: EntityId,
-    pub png: Arc<[u8]>,
+    pub area: MaskArea,
+}
+
+/// What a manual inpainting run removes.
+#[derive(Clone, Debug)]
+pub enum MaskArea {
+    /// Every pixel a grayscale PNG mask covers, as a brush or rectangle
+    /// paints it.
+    Painted(Arc<[u8]>),
+    /// The detected text at these places, removed as the pipeline's
+    /// inpainting removes it there.
+    Text(Vec<TextPlace>),
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, Type)]

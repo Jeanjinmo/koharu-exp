@@ -26,11 +26,11 @@ pub use pipeline::Pipeline;
 pub use progress::{Progress, ProgressSink};
 pub use reading::LayoutBox;
 pub use report::{Committer, Report, RunStatus, StageOutput};
-pub use request::{InpaintingMask, Operation, Request, StopToken};
+pub use request::{InpaintingMask, MaskArea, Operation, Request, StopToken};
 pub use resources::{DeviceResources, ResourceSnapshot};
 pub use scope::{Bounds, Scope};
 pub use stage::Stage;
-pub use stages::{Flux2KleinConfig, KoharuLayoutRFDetrSeg2XLConfig, RoremMixedConfig};
+pub use stages::{Flux2KleinConfig, KoharuLayoutRFDetrSeg2XLConfig, RoremMixedConfig, TextPlace};
 
 use images::ImageCache;
 use model_cell::ModelCell;

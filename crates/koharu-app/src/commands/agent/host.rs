@@ -11,8 +11,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use koharu_agent::{Control, Host, Invocation, Tool, ToolCall, ToolGroup, ToolMetadata, Vision};
 use koharu_desktop::{Desktop, Frame};
 use koharu_pipeline::{
-    Bounds, Committer, InpaintingMask, Operation, PipelineConfig, Report, RunStatus, Scope, Stage,
-    StageOutput, StopToken,
+    Bounds, Committer, InpaintingMask, MaskArea, Operation, PipelineConfig, Report, RunStatus,
+    Scope, Stage, StageOutput, StopToken, TextPlace,
 };
 use koharu_renderer::RenderDiagnostic;
 use koharu_scene::{
@@ -234,23 +234,61 @@ impl KoharuHost {
         Ok(on_page(Invocation::changed(result)?, page))
     }
 
-    /// Inpaints only the given area of a page into its cleanup layer.
+    /// Inpaints only the given area of a page into its cleanup layer. Text
+    /// elements are removed as the pipeline removes their detected text; a
+    /// rect or a brush path is inpainted pixel for pixel.
     async fn remove(&self, arguments: Remove, control: &Control) -> Result<Invocation> {
         let page = entity(&arguments.page)?;
         let snapshot = self.snapshot().await?;
-        let area = area(&snapshot, page, arguments.area)?;
         let (width, height) = page_pixels(&snapshot, page)?;
-        let (png, bounds) = tokio_rayon::spawn(move || area.mask_png(width, height)).await?;
+        let AreaArguments {
+            elements,
+            rect,
+            points,
+            diameter,
+        } = arguments.area;
+        let (area, bounds) = if !elements.is_empty() && rect.is_none() && points.is_empty() {
+            let places = elements
+                .iter()
+                .map(|element| outline::text_place(&snapshot, page, entity(element)?))
+                .collect::<Result<Vec<_>>>()?;
+            let bounds = places
+                .iter()
+                .map(TextPlace::extent)
+                .reduce(|a, b| {
+                    let x = a.x.min(b.x);
+                    let y = a.y.min(b.y);
+                    Bounds {
+                        x,
+                        y,
+                        width: (a.x + a.width).max(b.x + b.width) - x,
+                        height: (a.y + a.height).max(b.y + b.height) - y,
+                    }
+                })
+                .and_then(|bounds| within_page(bounds, width, height))
+                .context("the elements do not cover any part of the page")?;
+            (MaskArea::Text(places), bounds)
+        } else {
+            let area = area(
+                &snapshot,
+                page,
+                AreaArguments {
+                    elements,
+                    rect,
+                    points,
+                    diameter,
+                },
+            )?;
+            let (png, bounds) = tokio_rayon::spawn(move || area.mask_png(width, height)).await?;
+            (MaskArea::Painted(Arc::from(png)), bounds)
+        };
         let report = self
             .process(
                 Scope::Region { page, bounds },
                 Operation::Only {
                     stage: Stage::Inpainting,
                 },
-                Some(InpaintingMask {
-                    page,
-                    png: Arc::from(png),
-                }),
+                Some(InpaintingMask { page, area }),
                 control,
             )
             .await?;
@@ -989,7 +1027,7 @@ fn tools() -> &'static [Tool] {
                 ),
                 definition::<Remove>(
                     "remove",
-                    "Remove artwork such as original text from one area of a page by inpainting it, like the Remove tool. Pixels outside the area do not change; the result goes into the page's cleanup layer and can be undone. Give the area as text elements, a rect, or a brush path. The inpainting model tends to continue structural lines through the area.",
+                    "Remove artwork such as original text from one area of a page by inpainting it, like the Remove tool. Prefer text elements: their detected original text is removed whole, inside its bubble, as the pipeline's inpainting removes it. A rect or a brush path inpaints exactly its pixels. Pixels outside the area do not change; the result goes into the page's cleanup layer and can be undone. The inpainting model tends to continue structural lines through a rect or path.",
                     ToolMetadata {
                         vision: Vision::Better,
                         mutates_image: true,
@@ -1068,6 +1106,20 @@ fn area(snapshot: &Snapshot, page: EntityId, arguments: AreaArguments) -> Result
         }),
         _ => bail!("give exactly one of elements, rect, or points with diameter"),
     }
+}
+
+/// `bounds` cut to a `width` by `height` page, when any of it is on the page.
+fn within_page(bounds: Bounds, width: u32, height: u32) -> Option<Bounds> {
+    let left = bounds.x.max(0.0);
+    let top = bounds.y.max(0.0);
+    let right = (bounds.x + bounds.width).min(f64::from(width));
+    let bottom = (bounds.y + bounds.height).min(f64::from(height));
+    (right > left && bottom > top).then_some(Bounds {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    })
 }
 
 fn hex_color(value: &str) -> Result<[u8; 4]> {

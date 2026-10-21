@@ -5,8 +5,11 @@
 use std::collections::HashMap;
 
 use anyhow::{Context as _, Result, bail};
-use koharu_pipeline::Bounds;
-use koharu_scene::{EntityId, PageStatus, RasterLayerKind, Snapshot, TextAlignment, WritingMode};
+use koharu_pipeline::{Bounds, TextPlace};
+use koharu_scene::{
+    BubbleRegion, EntityId, PageStatus, RasterLayerKind, RegionSpec as _, Snapshot, TextAlignment,
+    WritingMode,
+};
 use serde::Serialize;
 
 use crate::commands::{
@@ -191,6 +194,81 @@ pub(super) fn element_area(
     })
 }
 
+/// Where a text element's original text is, for removing it as the pipeline
+/// does: the box it was detected in, joined with the box its text is laid out
+/// in when the two overlap, and the bubble it flows into.
+pub(super) fn text_place(
+    snapshot: &Snapshot,
+    page: EntityId,
+    element: EntityId,
+) -> Result<TextPlace> {
+    if Project::containing_page(snapshot, element)? != page {
+        bail!("element {element} is not on page {page}");
+    }
+    let view = Project::page(snapshot, page)?;
+    let Some(Layer::Text {
+        geometry,
+        content,
+        automatic_region,
+        ..
+    }) = view
+        .layers
+        .into_iter()
+        .find(|layer| layer_id(layer) == element)
+    else {
+        bail!("element {element} is not a text element");
+    };
+    let region =
+        |id: Option<EntityId>| id.and_then(|id| view.regions.iter().find(|region| region.id == id));
+    let automatic = region(automatic_region);
+    let detected = region(content.source_region).and_then(|region| extent(&region.geometry));
+    let layout = geometry
+        .as_ref()
+        .or(automatic.map(|region| &region.geometry))
+        .and_then(extent);
+    let [x, y, width, height] = match (detected, layout) {
+        (Some(detected), Some(layout)) if overlap(detected, layout) => union(detected, layout),
+        (Some(detected), _) => detected,
+        (None, Some(layout)) => layout,
+        (None, None) => bail!("element {element} has no area on the page"),
+    };
+    let bubble = automatic
+        .filter(|region| region.kind == BubbleRegion::KIND)
+        .map(|region| {
+            region
+                .geometry
+                .points
+                .iter()
+                .map(|point| [point.x, point.y])
+                .collect()
+        });
+    Ok(TextPlace {
+        bounds: Bounds {
+            x,
+            y,
+            width,
+            height,
+        },
+        bubble,
+    })
+}
+
+/// `[x, y, width, height]` boxes.
+fn overlap(a: [f64; 4], b: [f64; 4]) -> bool {
+    a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
+}
+
+fn union(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
+    let left = a[0].min(b[0]);
+    let top = a[1].min(b[1]);
+    [
+        left,
+        top,
+        (a[0] + a[2]).max(b[0] + b[2]) - left,
+        (a[1] + a[3]).max(b[1] + b[3]) - top,
+    ]
+}
+
 fn layer_id(layer: &Layer) -> EntityId {
     match layer {
         Layer::Group { id, .. }
@@ -252,12 +330,98 @@ fn is_true(value: &bool) -> bool {
 #[cfg(test)]
 mod tests {
     use koharu_scene::{
-        At, Authored, Geometry as SceneGeometry, LanguageTag, Origin, PageDraft, RasterLayer,
-        RecognizedFrom, ReferenceText, Session, SourceText, TextLayout, TextLayoutKind, TextRegion,
-        Translation,
+        At, Authored, FlowsIn, Geometry as SceneGeometry, LanguageTag, Origin, PageDraft,
+        RasterLayer, RecognizedFrom, ReferenceText, Session, SourceText, TextLayout,
+        TextLayoutKind, TextRegion, Translation,
     };
 
     use super::*;
+
+    #[tokio::test]
+    async fn text_places_join_detected_and_layout_boxes_and_keep_the_bubble() {
+        let mut session = Session::memory().await.unwrap();
+        let mut ids = None;
+        let patch = session
+            .snapshot()
+            .patch(|edit| {
+                let page = edit.add_page(PageDraft::new("001.png", 1000.0, 1000.0), At::End)?;
+                let bubble = edit.add_analysis_region::<BubbleRegion>(
+                    page,
+                    At::End,
+                    &SceneGeometry::rectangle(100.0, 100.0, 300.0, 200.0),
+                    None,
+                )?;
+                let mut layers = Vec::new();
+                for (detected, frame, flows) in [
+                    // Flows into the bubble, detected inside it.
+                    (Some((150.0, 120.0, 80.0, 60.0)), None, true),
+                    // Laid out far from where it was detected.
+                    (
+                        Some((600.0, 600.0, 50.0, 50.0)),
+                        Some((10.0, 10.0, 40.0, 40.0)),
+                        false,
+                    ),
+                    // Added by hand, never detected.
+                    (None, Some((700.0, 100.0, 90.0, 30.0)), false),
+                ] {
+                    let content = edit.add_text_content(page, At::End)?;
+                    if let Some((x, y, width, height)) = detected {
+                        let region = edit.add_analysis_region::<TextRegion>(
+                            page,
+                            At::End,
+                            &SceneGeometry::rectangle(x, y, width, height),
+                            None,
+                        )?;
+                        edit.relate::<RecognizedFrom>(content, region)?;
+                    }
+                    let layer = edit.add_text_layer(
+                        page,
+                        At::End,
+                        content,
+                        &TextLayout {
+                            origin: Origin::User,
+                            kind: TextLayoutKind::Paragraph,
+                            angle_degrees: None,
+                        },
+                    )?;
+                    if let Some((x, y, width, height)) = frame {
+                        edit.set(layer, &SceneGeometry::rectangle(x, y, width, height))?;
+                    }
+                    if flows {
+                        edit.relate::<FlowsIn>(layer, bubble)?;
+                    }
+                    layers.push(layer);
+                }
+                ids = Some((page, layers));
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = session.commit(patch).await.unwrap().snapshot;
+        let (page, layers) = ids.unwrap();
+        let place = |layer| text_place(&snapshot, page, layer).unwrap();
+        let bounds = |x, y, width, height| Bounds {
+            x,
+            y,
+            width,
+            height,
+        };
+
+        let in_bubble = place(layers[0]);
+        assert_eq!(in_bubble.bounds, bounds(100.0, 100.0, 300.0, 200.0));
+        assert_eq!(
+            in_bubble.bubble,
+            Some(vec![
+                [100.0, 100.0],
+                [400.0, 100.0],
+                [400.0, 300.0],
+                [100.0, 300.0]
+            ])
+        );
+        let moved = place(layers[1]);
+        assert_eq!(moved.bounds, bounds(600.0, 600.0, 50.0, 50.0));
+        assert_eq!(moved.bubble, None);
+        assert_eq!(place(layers[2]).bounds, bounds(700.0, 100.0, 90.0, 30.0));
+    }
 
     #[tokio::test]
     async fn a_page_of_ten_balloons_stays_compact() {

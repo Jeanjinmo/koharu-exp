@@ -389,7 +389,7 @@ pub(crate) async fn commit_inpaint(
             .await?;
     *handle.state::<Processing>().inpainting_mask.lock() = Some(koharu_pipeline::InpaintingMask {
         page,
-        png: Arc::from(png),
+        area: koharu_pipeline::MaskArea::Painted(Arc::from(png)),
     });
     Ok(Some(
         processing::process(
