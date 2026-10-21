@@ -3,6 +3,10 @@ name: Build
 on:
   push:
     branches: ['main', 'feat/**']
+    # koharu-exp: a push that only touches documents or test notes needs no build.
+    paths-ignore:
+      - '**.md'
+      - 'uji-fase3/**'
   pull_request:
   workflow_dispatch:
 
