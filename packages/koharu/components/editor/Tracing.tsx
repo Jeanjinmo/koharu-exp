@@ -9,6 +9,16 @@ import { call } from '@/lib/backend'
 import { pagesKey, projectKey, refresh, usePages } from '@/lib/queries'
 import { useKoharuStore } from '@/lib/store'
 import { commands, type Page, type ReferencePlacement } from '@koharu/bridge/protocol'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@koharu/ui/components/alert-dialog'
 import { Button } from '@koharu/ui/components/button'
 import { Input } from '@koharu/ui/components/input'
 import { toast } from '@koharu/ui/components/toast'
@@ -54,7 +64,10 @@ export function TracingOverlay({ page }: { page: Page }) {
     x: number
     y: number
     placement: ReferencePlacement
+    moved: boolean
   } | null>(null)
+  // Alt+wheel steps closer together than this are one undo step.
+  const lastWheel = useRef(Number.NEGATIVE_INFINITY)
   const surface = useRef<HTMLDivElement>(null)
 
   // Focus the overlay when aligning starts, so the arrow keys nudge at once.
@@ -84,11 +97,14 @@ export function TracingOverlay({ page }: { page: Page }) {
     if (!delta) return
     event.preventDefault()
     event.stopPropagation()
-    moveTracing({
-      ...placement,
-      x: placement.x + delta[0] / page.size.width,
-      y: placement.y + delta[1] / page.size.height,
-    })
+    moveTracing(
+      {
+        ...placement,
+        x: placement.x + delta[0] / page.size.width,
+        y: placement.y + delta[1] / page.size.height,
+      },
+      !event.repeat,
+    )
   }
 
   return (
@@ -104,16 +120,26 @@ export function TracingOverlay({ page }: { page: Page }) {
         if (event.button !== 0) return
         event.currentTarget.focus()
         event.currentTarget.setPointerCapture(event.pointerId)
-        drag.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, placement }
+        drag.current = {
+          pointer: event.pointerId,
+          x: event.clientX,
+          y: event.clientY,
+          placement,
+          moved: false,
+        }
       }}
       onPointerMove={(event) => {
         const start = drag.current
         if (!start || start.pointer !== event.pointerId) return
-        moveTracing({
-          ...start.placement,
-          x: start.placement.x + (event.clientX - start.x) * perPixel.x,
-          y: start.placement.y + (event.clientY - start.y) * perPixel.y,
-        })
+        moveTracing(
+          {
+            ...start.placement,
+            x: start.placement.x + (event.clientX - start.x) * perPixel.x,
+            y: start.placement.y + (event.clientY - start.y) * perPixel.y,
+          },
+          !start.moved,
+        )
+        start.moved = true
       }}
       onPointerUp={(event) => {
         drag.current = null
@@ -134,7 +160,11 @@ export function TracingOverlay({ page }: { page: Page }) {
           ((event.clientY - bounds.y) * dpr - camera.translation[1]) /
           camera.zoom /
           page.size.height
-        moveTracing(scaled(placement, Math.exp(-event.deltaY * 0.0005), x, y))
+        moveTracing(
+          scaled(placement, Math.exp(-event.deltaY * 0.0005), x, y),
+          event.timeStamp - lastWheel.current > 400,
+        )
+        lastWheel.current = event.timeStamp
       }}
     >
       {source && (
@@ -169,6 +199,10 @@ export function TracingPanel({ page }: { page: Page }) {
   const moveTracing = useKoharuStore((state) => state.moveTracing)
   const setOpacity = useKoharuStore((state) => state.setTracingOpacity)
   const stopTracing = useKoharuStore((state) => state.stopTracing)
+  const leaveTracing = useKoharuStore((state) => state.leaveTracing)
+  const stayTracing = useKoharuStore((state) => state.stayTracing)
+  // The field being typed into; its keystrokes are one undo step.
+  const typing = useRef<string | null>(null)
   const pages = usePages().data
   const index = pages?.findIndex((candidate) => candidate.id === page.id) ?? -1
   const saved = index >= 0 ? (pages?.[index]?.reference?.placement ?? null) : null
@@ -203,6 +237,22 @@ export function TracingPanel({ page }: { page: Page }) {
       .filter((candidate) => candidate.reference)
       .map((candidate) => candidate.id)
 
+  // Answers the question asked before leaving with an unsaved alignment.
+  const leave = (save: boolean) => {
+    const after = tracing.leaving?.after
+    const done = () => {
+      stopTracing()
+      after?.()
+    }
+    if (!save || !placement) {
+      done()
+      return
+    }
+    void savePlacement([page.id], placement)
+      .then(done)
+      .catch(() => stayTracing())
+  }
+
   const field = (key: 'x' | 'y' | 'width' | 'height') => {
     if (!placement || !rect) return null
     const extent = key === 'x' || key === 'width' ? page.size.width : page.size.height
@@ -218,8 +268,10 @@ export function TracingPanel({ page }: { page: Page }) {
             const value = event.currentTarget.valueAsNumber
             if (!Number.isFinite(value)) return
             if ((key === 'width' || key === 'height') && value <= 0) return
-            moveTracing({ ...placement, [key]: value / extent })
+            moveTracing({ ...placement, [key]: value / extent }, typing.current !== key)
+            typing.current = key
           }}
+          onBlur={() => (typing.current = null)}
         />
       </label>
     )
@@ -240,7 +292,7 @@ export function TracingPanel({ page }: { page: Page }) {
           size='icon-xs'
           variant='ghost'
           aria-label={t('tracing.close')}
-          onClick={stopTracing}
+          onClick={() => leaveTracing()}
         >
           <X />
         </Button>
@@ -329,6 +381,28 @@ export function TracingPanel({ page }: { page: Page }) {
       ) : (
         <p className='text-muted-foreground'>{t('tracing.noReference')}</p>
       )}
+      <AlertDialog
+        open={Boolean(tracing.leaving)}
+        onOpenChange={(open) => {
+          if (!open) stayTracing()
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('tracing.leaveTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('tracing.leaveDescription', { page: page.label })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('tracing.keepAligning')}</AlertDialogCancel>
+            <AlertDialogAction variant='outline' onClick={() => leave(false)}>
+              {t('tracing.discard')}
+            </AlertDialogAction>
+            <AlertDialogAction onClick={() => leave(true)}>{t('tracing.save')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   )
 }

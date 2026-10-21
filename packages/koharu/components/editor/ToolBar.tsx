@@ -57,7 +57,9 @@ export function ToolBar() {
   const setTool = useKoharuStore((state) => state.setTool)
   const setBrush = useKoharuStore((state) => state.setBrush)
   const shortcuts = useKoharuStore((state) => state.shortcuts)
-  const hasBrush = isBrushTool(active)
+  // Tools wait while a reference is aligned, so a stray click cannot end it.
+  const aligning = useKoharuStore((state) => state.tracing !== null)
+  const hasBrush = isBrushTool(active) && !aligning
 
   return (
     <aside className='absolute top-3 left-3 z-20 flex w-11 flex-col rounded-2xl border border-border bg-[var(--surface-floating)] p-1 shadow-[var(--shadow-toolrail)]'>
@@ -73,18 +75,27 @@ export function ToolBar() {
                     variant='ghost'
                     size='icon'
                     disabled={!page}
+                    aria-disabled={aligning || undefined}
                     aria-label={t(`tools.${tool}`)}
                     data-active={active === tool}
-                    className='relative text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-30 data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
-                    onClick={() => setTool(tool)}
+                    className='relative text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:opacity-30 aria-disabled:hover:bg-transparent data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
+                    onClick={() => {
+                      if (!aligning) setTool(tool)
+                    }}
                   />
                 }
               >
                 <Icon className='size-4' />
               </TooltipTrigger>
               <TooltipContent side='right'>
-                {t(`tools.${tool}`)}
-                <span className='ml-2 opacity-60'>{shortcuts[tool].toUpperCase()}</span>
+                {aligning ? (
+                  t('tracing.toolsLocked')
+                ) : (
+                  <>
+                    {t(`tools.${tool}`)}
+                    <span className='ml-2 opacity-60'>{shortcuts[tool].toUpperCase()}</span>
+                  </>
+                )}
               </TooltipContent>
             </Tooltip>
           </div>

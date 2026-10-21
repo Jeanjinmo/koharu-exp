@@ -1848,6 +1848,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn attaching_placing_and_removing_references_undo_and_redo() {
+        let (mut project, page, _) = project_with_text(0).await;
+        let reference = |project: &Project| {
+            Project::pages(&project.snapshot()).unwrap()[0]
+                .reference
+                .clone()
+        };
+        let commit = project
+            .attach_references(
+                vec![(
+                    page,
+                    AssetInput::new(
+                        &b"reference"[..],
+                        "image/jpeg",
+                        AssetMetadata {
+                            width: Some(80),
+                            height: Some(120),
+                            attributes: Default::default(),
+                        },
+                    ),
+                )],
+                LanguageTag::new("en-US").unwrap(),
+            )
+            .await
+            .unwrap();
+        project.record_commit(&commit);
+        let attached = reference(&project).unwrap();
+        let moved = ReferencePlacement {
+            x: 0.1,
+            ..ReferencePlacement::FILL
+        };
+        let commit = project.place_references(vec![page], moved).await.unwrap();
+        project.record_commit(&commit);
+
+        // Undo walks back through the placement and the attachment; redo
+        // brings both back in order.
+        project.undo().await.unwrap();
+        assert_eq!(
+            reference(&project).unwrap().placement,
+            ReferencePlacement::FILL
+        );
+        project.undo().await.unwrap();
+        assert!(reference(&project).is_none());
+        project.redo().await.unwrap();
+        assert_eq!(reference(&project).unwrap().asset, attached.asset);
+        project.redo().await.unwrap();
+        assert_eq!(reference(&project).unwrap().placement, moved);
+
+        let commit = project.detach_references(vec![page]).await.unwrap();
+        project.record_commit(&commit);
+        assert!(reference(&project).is_none());
+        project.undo().await.unwrap();
+        assert_eq!(reference(&project).unwrap().placement, moved);
+        project.redo().await.unwrap();
+        assert!(reference(&project).is_none());
+        project.undo().await.unwrap();
+        assert_eq!(reference(&project).unwrap().asset, attached.asset);
+    }
+
+    #[tokio::test]
     async fn reference_placement_applies_to_every_page_in_one_step() {
         let (mut project, first, _) = project_with_text(0).await;
         let patch = project

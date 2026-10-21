@@ -60,6 +60,14 @@ export interface Tracing {
   /** Whether `placement` differs from the saved one. */
   changed: boolean
   opacity: number
+  /**
+   * This session's own history of placements, oldest first. Undo and redo
+   * walk it while aligning, so they never reach the project's history.
+   */
+  undo: ReferencePlacement[]
+  redo: ReferencePlacement[]
+  /** Set while asking whether to save before leaving; `after` runs once left. */
+  leaving: { after: (() => void) | null } | null
 }
 export type Shortcuts = Record<ShortcutAction, string>
 export type PipelineScope = 'page' | 'selected-pages' | 'project'
@@ -110,11 +118,27 @@ interface KoharuStore {
   setComparePeeking: (peeking: boolean) => void
   setCompareSplit: (split: number) => void
   setCompareSubject: (subject: CompareSubject) => void
-  /** Starts aligning `page`'s reference from its saved placement. */
+  /**
+   * Starts aligning `page`'s reference from its saved placement. Aligning the
+   * page already being aligned keeps the session.
+   */
   startTracing: (page: EntityId, placement: ReferencePlacement | null) => void
-  moveTracing: (placement: ReferencePlacement) => void
+  /**
+   * Moves the reference. `record: false` continues the change recorded last,
+   * so one drag or one typed value is one undo step.
+   */
+  moveTracing: (placement: ReferencePlacement, record?: boolean) => void
+  undoTracing: () => void
+  redoTracing: () => void
   setTracingOpacity: (opacity: number) => void
+  /** Ends aligning at once, dropping an unsaved alignment. */
   stopTracing: () => void
+  /**
+   * Ends aligning, first asking whether to save an unsaved alignment, then
+   * runs `after`. Staying keeps aligning and drops `after`.
+   */
+  leaveTracing: (after?: () => void) => void
+  stayTracing: () => void
   setReferencePick: (layer: EntityId | null) => void
   selectLayers: (layers: EntityId[]) => void
   setTool: (tool: CanvasTool) => void
@@ -157,7 +181,10 @@ function rememberCompareMode(mode: CompareMode): void {
   }
 }
 
-export const useKoharuStore = create<KoharuStore>()((set) => ({
+/** How many placements one aligning session can undo. */
+const TRACING_HISTORY = 100
+
+export const useKoharuStore = create<KoharuStore>()((set, get) => ({
   initialized: false,
   preferences: null,
   translationModels: [],
@@ -200,14 +227,18 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setCleanup: (cleanup) => set({ cleanup }),
   setReferenceImport: (referenceImport) => set({ referenceImport }),
-  // Compare and aligning a reference both draw over the canvas, so one
-  // closes the other.
-  setCompareOpen: (open) =>
-    set((state) => ({
-      compare: { ...state.compare, open, peeking: false },
-      tracing: open ? null : state.tracing,
-      referencePick: open ? null : state.referencePick,
-    })),
+  // Compare, aligning a reference, and picking reference text all draw over
+  // the canvas, so each closes the others. Aligning is left only after
+  // asking about an unsaved alignment.
+  setCompareOpen: (open) => {
+    const show = () =>
+      set((state) => ({
+        compare: { ...state.compare, open, peeking: false },
+        referencePick: open ? null : state.referencePick,
+      }))
+    if (open && get().tracing) get().leaveTracing(show)
+    else show()
+  },
   setCompareMode: (mode) => {
     rememberCompareMode(mode)
     set((state) => ({ compare: { ...state.compare, mode, peeking: false } }))
@@ -217,26 +248,91 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
     set((state) => ({ compare: { ...state.compare, split: Math.min(1, Math.max(0, split)) } })),
   setCompareSubject: (subject) => set((state) => ({ compare: { ...state.compare, subject } })),
   startTracing: (page, placement) =>
-    set((state) => ({
-      compare: { ...state.compare, open: false, peeking: false },
-      tracing: { page, placement, changed: false, opacity: state.tracing?.opacity ?? 0.5 },
-      referencePick: null,
-    })),
-  moveTracing: (placement) =>
-    set((state) => ({
-      tracing: state.tracing && { ...state.tracing, placement, changed: true },
-    })),
+    set((state) =>
+      state.tracing?.page === page
+        ? {}
+        : {
+            compare: { ...state.compare, open: false, peeking: false },
+            tracing: {
+              page,
+              placement,
+              changed: false,
+              opacity: state.tracing?.opacity ?? 0.5,
+              undo: [],
+              redo: [],
+              leaving: null,
+            },
+            referencePick: null,
+          },
+    ),
+  moveTracing: (placement, record = true) =>
+    set(({ tracing }) => {
+      if (!tracing) return {}
+      const recorded = record && tracing.placement
+      return {
+        tracing: {
+          ...tracing,
+          placement,
+          changed: true,
+          undo: recorded ? [...tracing.undo, recorded].slice(-TRACING_HISTORY) : tracing.undo,
+          redo: record ? [] : tracing.redo,
+        },
+      }
+    }),
+  undoTracing: () =>
+    set(({ tracing }) => {
+      const previous = tracing?.undo.at(-1)
+      if (!tracing?.placement || !previous) return {}
+      const undo = tracing.undo.slice(0, -1)
+      return {
+        tracing: {
+          ...tracing,
+          placement: previous,
+          // The oldest placement is the saved one.
+          changed: undo.length > 0,
+          undo,
+          redo: [...tracing.redo, tracing.placement],
+        },
+      }
+    }),
+  redoTracing: () =>
+    set(({ tracing }) => {
+      const next = tracing?.redo.at(-1)
+      if (!tracing?.placement || !next) return {}
+      return {
+        tracing: {
+          ...tracing,
+          placement: next,
+          changed: true,
+          undo: [...tracing.undo, tracing.placement],
+          redo: tracing.redo.slice(0, -1),
+        },
+      }
+    }),
   setTracingOpacity: (opacity) =>
     set((state) => ({
       tracing: state.tracing && { ...state.tracing, opacity: Math.min(1, Math.max(0, opacity)) },
     })),
   stopTracing: () => set({ tracing: null }),
-  setReferencePick: (referencePick) =>
-    set((state) => ({
-      referencePick,
-      compare: referencePick ? { ...state.compare, open: false, peeking: false } : state.compare,
-      tracing: referencePick ? null : state.tracing,
-    })),
+  leaveTracing: (after) => {
+    const tracing = get().tracing
+    if (tracing?.changed && tracing.placement) {
+      set({ tracing: { ...tracing, leaving: { after: after ?? null } } })
+      return
+    }
+    set({ tracing: null })
+    after?.()
+  },
+  stayTracing: () => set(({ tracing }) => ({ tracing: tracing && { ...tracing, leaving: null } })),
+  setReferencePick: (referencePick) => {
+    const pick = () =>
+      set((state) => ({
+        referencePick,
+        compare: referencePick ? { ...state.compare, open: false, peeking: false } : state.compare,
+      }))
+    if (referencePick && get().tracing) get().leaveTracing(pick)
+    else pick()
+  },
   selectLayers: (selectedLayers) => set({ selectedLayers: [...new Set(selectedLayers)] }),
   setTool: (tool) => set({ tool }),
   setBrush: (brush) => set({ brush }),

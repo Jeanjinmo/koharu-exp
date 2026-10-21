@@ -66,6 +66,11 @@ export function TitleBar() {
   const compareShortcut = useKoharuStore((state) => state.shortcuts.compare)
   const requestCanvasFit = useKoharuStore((state) => state.requestCanvasFit)
   const startTracing = useKoharuStore((state) => state.startTracing)
+  // While a reference is aligned, Undo and Redo walk the alignment instead
+  // of the project.
+  const tracing = useKoharuStore((state) => state.tracing)
+  const undoTracing = useKoharuStore((state) => state.undoTracing)
+  const redoTracing = useKoharuStore((state) => state.redoTracing)
   const reference = pages.find((candidate) => candidate.id === page?.id)?.reference ?? null
   const { importPages, importing } = useImportPages()
   const { run: exportProject, busy: exporting } = useCommand(
@@ -181,22 +186,26 @@ export function TitleBar() {
             <MenubarTrigger>{t('menu.edit')}</MenubarTrigger>
             <MenubarContent>
               <MenubarItem
-                disabled={!project?.can_undo}
+                disabled={tracing ? tracing.undo.length === 0 : !project?.can_undo}
                 onClick={() =>
-                  void call(commands.undo)
-                    .then(() => refresh(projectKey, pagesKey, pageKey))
-                    .catch(() => undefined)
+                  tracing
+                    ? undoTracing()
+                    : void call(commands.undo)
+                        .then(() => refresh(projectKey, pagesKey, pageKey))
+                        .catch(() => undefined)
                 }
               >
                 {t('menu.undo')}
                 <MenubarShortcut>Ctrl+Z</MenubarShortcut>
               </MenubarItem>
               <MenubarItem
-                disabled={!project?.can_redo}
+                disabled={tracing ? tracing.redo.length === 0 : !project?.can_redo}
                 onClick={() =>
-                  void call(commands.redo)
-                    .then(() => refresh(projectKey, pagesKey, pageKey))
-                    .catch(() => undefined)
+                  tracing
+                    ? redoTracing()
+                    : void call(commands.redo)
+                        .then(() => refresh(projectKey, pagesKey, pageKey))
+                        .catch(() => undefined)
                 }
               >
                 {t('menu.redo')}

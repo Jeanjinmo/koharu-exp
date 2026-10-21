@@ -331,17 +331,20 @@ export function CanvasWorkspace() {
   useEffect(() => cancelGesture, [cancelGesture, canvasGeneration, canvasRevision, page?.id, tool])
 
   useEffect(() => {
-    const editable = (target: EventTarget | null) =>
+    // Keys typed into a field, or pressed while a dialog has focus, belong
+    // to that field or dialog.
+    const ownedElsewhere = (target: EventTarget | null) =>
       target instanceof HTMLInputElement ||
       target instanceof HTMLTextAreaElement ||
-      (target instanceof HTMLElement && target.isContentEditable)
+      (target instanceof HTMLElement &&
+        (target.isContentEditable || target.closest('[role="dialog"], [role="alertdialog"]')))
 
     const down = (event: KeyboardEvent) => {
       if (event.key === 'Alt') {
         event.preventDefault()
         return
       }
-      if (editable(event.target)) return
+      if (ownedElsewhere(event.target)) return
       const state = useKoharuStore.getState()
       if (event.code === 'Space') {
         spaceHeld.current = true
@@ -349,12 +352,22 @@ export function CanvasWorkspace() {
         return
       }
       const command = event.ctrlKey || event.metaKey
-      if (
-        !command &&
-        !event.altKey &&
-        !state.tracing &&
-        event.key.toLowerCase() === state.shortcuts.compare
-      ) {
+      // While aligning a reference, keys act on the alignment only: undo and
+      // redo walk its own history, Escape leaves it, and canvas tools,
+      // selection, deleting, and Compare wait until it ends.
+      if (state.tracing) {
+        if (command && event.key.toLowerCase() === 'z') {
+          event.preventDefault()
+          if (event.shiftKey) state.redoTracing()
+          else state.undoTracing()
+        } else if (event.key === 'Escape') {
+          if (!state.tracing.leaving) state.leaveTracing()
+        } else if (!command && event.key.toLowerCase() === state.shortcuts.fit) {
+          requestCanvasFit()
+        }
+        return
+      }
+      if (!command && !event.altKey && event.key.toLowerCase() === state.shortcuts.compare) {
         event.preventDefault()
         if (event.repeat) return
         // Hold to peek shows the original only while the key is down.

@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -89,6 +89,7 @@ beforeEach(() => {
     canvasSize: [1000, 1500],
     tracing: null,
     referencePick: null,
+    tool: 'select',
   })
   useKoharuStore.getState().setCompareOpen(false)
   useKoharuStore.getState().setCompareSubject('reference')
@@ -187,6 +188,121 @@ describe('aligning a reference', () => {
       page: 'three',
       placement: { x: 0, y: 0, width: 1, height: 1 },
       changed: false,
+    })
+  })
+})
+
+describe('aligning safely', () => {
+  it('keeps aligning through tool keys, toolbar clicks, and deleting, and undoes its own moves', async () => {
+    const undo = vi.spyOn(commands, 'undo').mockResolvedValue(null)
+    const redo = vi.spyOn(commands, 'redo').mockResolvedValue(null)
+    const deleteLayers = vi.spyOn(commands, 'deleteLayers').mockResolvedValue(null)
+    renderEditor()
+    act(() => {
+      useKoharuStore.setState({ tool: 'select', selectedLayers: ['element'] })
+      useKoharuStore.getState().startTracing('one', shifted)
+    })
+    const surface = await screen.findByRole('application', { name: 'Reference alignment' })
+
+    // One drag, however many moves it takes, then one nudge.
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 100, clientY: 100 })
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 110, clientY: 100 })
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 120, clientY: 100 })
+    fireEvent.pointerUp(surface, { pointerId: 1, clientX: 120, clientY: 100 })
+    const dragged = useKoharuStore.getState().tracing!.placement!
+    fireEvent.keyDown(surface, { key: 'ArrowDown' })
+
+    fireEvent.keyDown(surface, { key: 't' })
+    fireEvent.keyDown(surface, { key: 'Delete' })
+    const text = screen.getByRole('button', { name: 'Text' })
+    expect(text).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(text)
+    expect(useKoharuStore.getState().tool).toBe('select')
+    expect(deleteLayers).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(surface, { key: 'z', ctrlKey: true })
+    expect(useKoharuStore.getState().tracing!.placement).toEqual(dragged)
+    fireEvent.keyDown(surface, { key: 'z', ctrlKey: true })
+    expect(useKoharuStore.getState().tracing).toMatchObject({ placement: shifted, changed: false })
+    fireEvent.keyDown(surface, { key: 'z', ctrlKey: true, shiftKey: true })
+    expect(useKoharuStore.getState().tracing).toMatchObject({ placement: dragged, changed: true })
+    expect(undo).not.toHaveBeenCalled()
+    expect(redo).not.toHaveBeenCalled()
+  })
+
+  it('counts typing one value into a field as one undo step', async () => {
+    renderEditor()
+    act(() => useKoharuStore.getState().startTracing('one', shifted))
+    const x = await screen.findByRole('spinbutton', { name: 'X' })
+    fireEvent.change(x, { target: { value: '1' } })
+    fireEvent.change(x, { target: { value: '12' } })
+    fireEvent.change(x, { target: { value: '120' } })
+    fireEvent.blur(x)
+    expect(useKoharuStore.getState().tracing!.placement!.x).toBeCloseTo(0.12)
+    expect(useKoharuStore.getState().tool).toBe('select')
+
+    act(() => useKoharuStore.getState().undoTracing())
+    expect(useKoharuStore.getState().tracing!.placement).toEqual(shifted)
+  })
+
+  it('asks whether to save before Escape, Close, or Compare end an unsaved alignment', async () => {
+    const user = userEvent.setup()
+    const save = vi.spyOn(commands, 'setReferencePlacement').mockResolvedValue(null)
+    renderEditor()
+    act(() => {
+      useKoharuStore.getState().startTracing('one', shifted)
+      useKoharuStore.getState().moveTracing({ ...shifted, x: 0.2 })
+    })
+    const surface = await screen.findByRole('application', { name: 'Reference alignment' })
+
+    fireEvent.keyDown(surface, { key: 'Escape' })
+    let asked = await screen.findByRole('alertdialog', { name: 'Save this alignment?' })
+    await user.click(within(asked).getByRole('button', { name: 'Keep aligning' }))
+    expect(useKoharuStore.getState().tracing).toMatchObject({ placement: { x: 0.2 } })
+
+    await user.click(screen.getByRole('button', { name: 'Compare' }))
+    asked = await screen.findByRole('alertdialog', { name: 'Save this alignment?' })
+    expect(useKoharuStore.getState().compare.open).toBe(false)
+    await user.click(within(asked).getByRole('button', { name: 'Save' }))
+    expect(save).toHaveBeenCalledWith(['one'], { ...shifted, x: 0.2 })
+    await waitFor(() => expect(useKoharuStore.getState().compare.open).toBe(true))
+    expect(useKoharuStore.getState().tracing).toBeNull()
+  })
+
+  it('discards when told to, and leaves an unchanged alignment without asking', async () => {
+    const user = userEvent.setup()
+    const save = vi.spyOn(commands, 'setReferencePlacement').mockResolvedValue(null)
+    renderEditor()
+    act(() => {
+      useKoharuStore.getState().startTracing('one', shifted)
+      useKoharuStore.getState().moveTracing({ ...shifted, x: 0.2 })
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Close alignment' }))
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Discard' }),
+    )
+    expect(useKoharuStore.getState().tracing).toBeNull()
+
+    act(() => useKoharuStore.getState().startTracing('one', shifted))
+    await user.click(await screen.findByRole('button', { name: 'Close alignment' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(useKoharuStore.getState().tracing).toBeNull()
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it('keeps the session when Align reference is chosen again', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    act(() => {
+      useKoharuStore.getState().startTracing('one', shifted)
+      useKoharuStore.getState().moveTracing({ ...shifted, x: 0.2 })
+    })
+    await user.click(screen.getByRole('button', { name: 'Compare mode' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Align reference…' }))
+    expect(useKoharuStore.getState().tracing).toMatchObject({
+      placement: { x: 0.2 },
+      changed: true,
     })
   })
 })

@@ -303,6 +303,28 @@ describe('greenfield editor', () => {
     )
   })
 
+  it('undoes the alignment, not the project, from the Edit menu while aligning', async () => {
+    const user = userEvent.setup()
+    installProject()
+    const undo = vi.spyOn(commands, 'undo').mockResolvedValue(null)
+    const whole = { x: 0, y: 0, width: 1, height: 1 }
+    act(() => {
+      useKoharuStore.getState().startTracing('page', whole)
+      useKoharuStore.getState().moveTracing({ ...whole, x: 0.1 })
+    })
+    render(<TitleBar />)
+
+    await user.click(screen.getByRole('menuitem', { name: 'Edit' }))
+    expect(await screen.findByRole('menuitem', { name: /^Redo/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    await user.click(screen.getByRole('menuitem', { name: /^Undo/ }))
+    expect(undo).not.toHaveBeenCalled()
+    expect(useKoharuStore.getState().tracing?.placement).toEqual(whole)
+    act(() => useKoharuStore.getState().stopTracing())
+  })
+
   it('shows import activity and prevents duplicate imports', async () => {
     const user = userEvent.setup()
     installProject()
