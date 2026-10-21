@@ -4,23 +4,23 @@ Hasil uji pemilik di Windows untuk build `feat/custom` @ `b4445470` (Actions Bui
 
 | # | Judul | Gelombang/fitur | Tingkat | Status |
 |---|---|---|---|---|
-| 01 | Tombol profil gelap dan tak terbaca setelah diklik | 3B – F3-18 profil | Rendah (tampilan) | Terbuka |
-| 02 | `remove` dengan ID elemen meninggalkan sisa coretan teks asli | 3A – F3-2 `remove` | Sedang | Terbuka |
-| 03 | Deteksi ulang area dilewati tanpa alasan, dan terblokir setelah elemen dihapus | 3A – F3-14 | Rendah–sedang | Terbuka |
-| 04 | Angka zoom menumpuk di atas tombol Compare di status bar | 3C – F3-19 Compare | Rendah (tampilan) | Terbuka |
+| 01 | Tombol profil gelap dan tak terbaca setelah diklik | 3B – F3-18 profil | Rendah (tampilan) | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 02 | `remove` dengan ID elemen meninggalkan sisa coretan teks asli | 3A – F3-2 `remove` | Sedang | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 03 | Deteksi ulang area dilewati tanpa alasan, dan terblokir setelah elemen dihapus | 3A – F3-14 | Rendah–sedang | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 04 | Angka zoom menumpuk di atas tombol Compare di status bar | 3C – F3-19 Compare | Rendah (tampilan) | Diperbaiki di R1/R2, menunggu uji pemilik |
 | 05 | Mode Slider di Compare terasa kaku (masukan UX) | 3C – F3-19 Compare | Rendah (rasa pakai) | Perlu detail |
-| 06 | Pasangan referensi tidak bisa dipindah langsung ke halaman tertentu (permintaan fitur) | 3D – F3-20 Import references | Sedang (rasa pakai) | Revisi (disetujui pemilik) |
-| 07 | Skip menggeser semua pasangan sesudahnya tanpa peringatan; tidak ada cara melepas satu pasangan tanpa menggeser | 3D – F3-20 Import references | Sedang (rasa pakai) | Terbuka |
+| 06 | Pasangan referensi tidak bisa dipindah langsung ke halaman tertentu (permintaan fitur) | 3D – F3-20 Import references | Sedang (rasa pakai) | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 07 | Skip menggeser semua pasangan sesudahnya tanpa peringatan; tidak ada cara melepas satu pasangan tanpa menggeser | 3D – F3-20 Import references | Sedang (rasa pakai) | Diperbaiki di R1/R2, menunggu uji pemilik |
 | 08 | MCP tidak bisa tahu halaman punya referensi, apalagi melihat gambarnya, sebelum Extract | 3D – F3-20 × MCP | Rendah (sesuai PRD, kandidat mendatang) | Catatan |
-| 09 | Panel Align reference dan toolbar canvas tidak bisa digeser atau diperkecil; opacity referensi tanpa tombol reset | 3D – Align reference; UI editor | Sedang (rasa pakai) | Terbuka |
-| 10 | Mode kalkir sulit dipakai di area putih: tepi referensi dan pas/tidaknya tidak terlihat | 3D – Align reference | Sedang (rasa pakai) | Terbuka |
-| 11 | Mode Align tertutup oleh tombol alat/shortcut (geseran hilang); Ctrl+Z di mode Align membatalkan import referensi | 3D – Align reference | Tinggi | Terbuka |
-| 12 | Tambah "Add reference…" di menu ⋯ halaman; Ctrl+drag untuk zoom ke area | 3D – Referensi, Align | Sedang (permintaan fitur) | Terbuka |
-| 13 | Extract salah memasangkan teks di balon bertumpuk (dua teks referensi masuk ke satu balon, dua balon kosong) | 3D – Extract text from references | Sedang | Terbuka |
-| 14 | UI tidak menandai teks yang meluber keluar balon (peringatan tidak muat baru ada untuk MCP) | Editor / F3-13 | Sedang (permintaan fitur) | Terbuka |
-| 15 | Tombol Save dan "Apply to following pages" di Align terasa sama; cakupannya tidak jelas | 3D – Align reference | Rendah (rasa pakai) | Terbuka |
-| 16 | Ubah status beberapa halaman sekaligus (Ctrl+klik) tidak berfungsi | 3B – F3-15 status halaman | Sedang | Terbuka |
-| 17 | Saat MCP server dimatikan, agent tidak menerima hasil tool yang sedang berjalan (koneksi putus) | 3B – F3-1 | Sedang | Perlu verifikasi |
+| 09 | Panel Align reference dan toolbar canvas tidak bisa digeser atau diperkecil; opacity referensi tanpa tombol reset | 3D – Align reference; UI editor | Sedang (rasa pakai) | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 10 | Mode kalkir sulit dipakai di area putih: tepi referensi dan pas/tidaknya tidak terlihat | 3D – Align reference | Sedang (rasa pakai) | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 11 | Mode Align tertutup oleh tombol alat/shortcut (geseran hilang); Ctrl+Z di mode Align membatalkan import referensi | 3D – Align reference | Tinggi | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 12 | Tambah "Add reference…" di menu ⋯ halaman; Ctrl+drag untuk zoom ke area | 3D – Referensi, Align | Sedang (permintaan fitur) | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 13 | Extract salah memasangkan teks di balon bertumpuk (dua teks referensi masuk ke satu balon, dua balon kosong) | 3D – Extract text from references | Sedang | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 14 | UI tidak menandai teks yang meluber keluar balon (peringatan tidak muat baru ada untuk MCP) | Editor / F3-13 | Sedang (permintaan fitur) | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 15 | Tombol Save dan "Apply to following pages" di Align terasa sama; cakupannya tidak jelas | 3D – Align reference | Rendah (rasa pakai) | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 16 | Ubah status beberapa halaman sekaligus (Ctrl+klik) tidak berfungsi | 3B – F3-15 status halaman | Sedang | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 17 | Saat MCP server dimatikan, agent tidak menerima hasil tool yang sedang berjalan (koneksi putus) | 3B – F3-1 | Sedang | Diperbaiki di R1/R2, menunggu uji pemilik |
 
 ## Hasil uji MCP oleh Claude Code (2026-10-21)
 
