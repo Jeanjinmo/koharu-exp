@@ -113,6 +113,7 @@ pub fn bindings() -> tauri_specta::Builder<tauri_runtime_cef::CefRuntime> {
             reference::get_staged_reference_thumbnail,
             reference::discard_staged_references,
             reference::attach_references,
+            reference::attach_reference_file,
             reference::detach_references,
             reference::set_reference_placement,
             reference::read_references,

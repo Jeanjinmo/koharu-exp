@@ -104,6 +104,12 @@ export const commands = {
 	 *  the staged images.
 	 */
 	attachReferences: (pairs: ReferencePair[], language: string) => __TAURI_INVOKE<null>("attach_references", { pairs, language }),
+	/**
+	 *  Asks for one image and attaches it as `page`'s reference in one undoable
+	 *  step, in place of any it has, without staging. `false` means the dialog
+	 *  was dismissed.
+	 */
+	attachReferenceFile: (page: EntityId, language: string, trimMargins: boolean) => __TAURI_INVOKE<boolean>("attach_reference_file", { page, language, trimMargins }),
 	detachReferences: (pages: EntityId[]) => __TAURI_INVOKE<null>("detach_references", { pages }),
 	/**
 	 *  Places the references of `pages` in one undoable step, for example the
@@ -635,11 +641,11 @@ export type ReferencePlacement = {
 
 /**  What reading references found, reported when the job ends. */
 export type ReferenceReading = {
-	/**  Text areas of the pages that received text from their reference. */
+	/**  Texts of the pages that received text from their reference. */
 	read: number,
-	/**  Text areas of the pages that no reference area matched. */
+	/**  Texts of the pages that no reference text matched clearly. */
 	unmatched: number,
-	/**  Text areas found in references that matched nothing on their page. */
+	/**  Texts found in references that matched nothing on their page. */
 	unused: number,
 };
 

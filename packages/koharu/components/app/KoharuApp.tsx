@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { TitleBar } from '@/components/app/TitleBar'
 import { Editor } from '@/components/editor/Editor'
 import { ProjectCleanupDialogs } from '@/components/editor/ProjectCleanup'
-import { ReferenceImportDialog } from '@/components/editor/References'
+import { ReferenceFileDialog, ReferenceImportDialog } from '@/components/editor/References'
 import { SettingsPage } from '@/components/preferences/SettingsPage'
 import { StartView } from '@/components/start/StartView'
 import { useProject } from '@/lib/queries'
@@ -54,6 +54,7 @@ export function KoharuApp() {
       )}
       {project && <ProjectCleanupDialogs />}
       {project && <ReferenceImportDialog />}
+      {project && <ReferenceFileDialog />}
     </div>
   )
 }

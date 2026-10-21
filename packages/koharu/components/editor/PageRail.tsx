@@ -7,6 +7,7 @@ import {
   FilePlus2,
   FolderOpen,
   HardDrive,
+  ImagePlus,
   LoaderCircle,
   MoreHorizontal,
   ScanText,
@@ -90,6 +91,7 @@ export function PageRail() {
   const setSettingsOpen = useKoharuStore((state) => state.setSettingsOpen)
   const setCleanup = useKoharuStore((state) => state.setCleanup)
   const setReferenceImport = useKoharuStore((state) => state.setReferenceImport)
+  const setReferenceFile = useKoharuStore((state) => state.setReferenceFile)
   const { importPages, importing } = useImportPages()
   const anchor = useRef<number | null>(null)
   const selectionRequest = useRef(0)
@@ -396,6 +398,7 @@ export function PageRail() {
                       onDragEnd={() => setDragged(null)}
                       onRename={() => openRename(page)}
                       onStatus={(status) => setStatus(page.id, status)}
+                      onAddReference={() => setReferenceFile(page.id)}
                       onReadReference={() => readReference(page.id)}
                       onRemoveReference={() => removeReference(page.id)}
                       onDelete={() => deletePage(page.id)}
@@ -552,6 +555,7 @@ function PageItem({
   onDragEnd,
   onRename,
   onStatus,
+  onAddReference,
   onReadReference,
   onRemoveReference,
   onDelete,
@@ -567,6 +571,7 @@ function PageItem({
   onDragEnd: () => void
   onRename: () => void
   onStatus: (status: PageStatus) => void
+  onAddReference: () => void
   onReadReference: () => void
   onRemoveReference: () => void
   onDelete: () => void
@@ -644,9 +649,12 @@ function PageItem({
                   ))}
                 </DropdownMenuRadioGroup>
               </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onAddReference}>
+                <ImagePlus /> {page.reference ? t('references.replace') : t('references.add')}
+              </DropdownMenuItem>
               {page.reference && (
                 <>
-                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={onReadReference}>
                     <ScanText /> {t('references.read')}
                   </DropdownMenuItem>

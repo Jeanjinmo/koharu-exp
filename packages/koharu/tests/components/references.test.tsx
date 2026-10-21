@@ -8,6 +8,7 @@ import { PageRail } from '@/components/editor/PageRail'
 import {
   moveReference,
   pairReferences,
+  ReferenceFileDialog,
   ReferenceImportDialog,
   shiftReferences,
   type Pairs,
@@ -308,6 +309,69 @@ describe('reference import', () => {
 
     expect(commands.discardStagedReferences).toHaveBeenCalled()
     expect(useKoharuStore.getState().referenceImport).toBe(false)
+  })
+
+  it('adds or replaces the reference of one page from its menu', async () => {
+    const user = userEvent.setup()
+    install([page('one'), page('two', english)])
+    useKoharuStore.setState({
+      preferences: {
+        languages: [
+          { tag: 'en-US', name: 'English' },
+          { tag: 'id-ID', name: 'Indonesian' },
+        ],
+        pipeline: { translation: { target_language: 'id-ID' } },
+      } as unknown as Preferences,
+    })
+    const attach = vi.spyOn(commands, 'attachReferenceFile').mockResolvedValue(true)
+    vi.spyOn(commands, 'getPages').mockResolvedValue([
+      page('one', { ...english, language: 'id-ID' }),
+      page('two', english),
+    ])
+    const notice = vi.spyOn(toast, 'add')
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PageRail />
+        <ReferenceFileDialog />
+      </QueryClientProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Actions for one' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Add reference…' }))
+    let dialog = await screen.findByRole('dialog', { name: 'Add reference' })
+    // A new reference is taken to be in the target language.
+    expect(within(dialog).getByRole('combobox', { name: 'Reference language' })).toHaveTextContent(
+      'Indonesian',
+    )
+    // Dismissing the file dialog keeps this one open for another try.
+    attach.mockResolvedValueOnce(false)
+    await user.click(within(dialog).getByRole('button', { name: 'Choose image…' }))
+    expect(attach).toHaveBeenLastCalledWith('one', 'id-ID', false)
+    expect(screen.getByRole('dialog', { name: 'Add reference' })).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('checkbox', { name: /Trim margins/ }))
+    await user.click(within(dialog).getByRole('button', { name: 'Choose image…' }))
+    expect(attach).toHaveBeenLastCalledWith('one', 'id-ID', true)
+    await waitFor(() =>
+      expect(notice).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Added a reference to 1. one' }),
+      ),
+    )
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    // A replaced reference keeps the language of the one it replaces.
+    await user.click(screen.getByRole('button', { name: 'Actions for two' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Replace reference…' }))
+    dialog = await screen.findByRole('dialog', { name: 'Replace reference' })
+    expect(within(dialog).getByRole('combobox', { name: 'Reference language' })).toHaveTextContent(
+      'English',
+    )
+    await user.click(within(dialog).getByRole('button', { name: 'Choose image…' }))
+    expect(attach).toHaveBeenLastCalledWith('two', 'en-US', false)
+    await waitFor(() =>
+      expect(notice).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Replaced the reference of 2. two' }),
+      ),
+    )
   })
 
   it('removes the references of every selected page from one page menu', async () => {

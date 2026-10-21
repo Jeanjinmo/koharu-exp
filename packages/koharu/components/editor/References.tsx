@@ -7,6 +7,7 @@ import {
   ChevronDown,
   FilePlus2,
   FolderOpen,
+  ImagePlus,
   LoaderCircle,
 } from 'lucide-react'
 import { useEffect, useId, useMemo, useState } from 'react'
@@ -21,6 +22,7 @@ import {
   commands,
   type PageImportSource,
   type PageSummary,
+  type Preferences,
   type ReferenceCandidate,
 } from '@koharu/bridge/protocol'
 import { Button } from '@koharu/ui/components/button'
@@ -59,6 +61,10 @@ export type Pairs = ReadonlyMap<string, number>
 export type ShiftDirection = 'up' | 'down'
 
 const noPairs: Pairs = new Map()
+
+// References are taken to be in the target language until told otherwise.
+const targetLanguageOf = (state: { preferences: Preferences | null }) =>
+  state.preferences?.pipeline.translation.target_language ?? 'en-US'
 
 /** How many characters at the end of a long name stay in view. */
 const NAME_TAIL = 12
@@ -200,13 +206,8 @@ export function ReferenceImportDialog() {
   const { t } = useTranslation()
   const open = useKoharuStore((state) => state.referenceImport)
   const setOpen = useKoharuStore((state) => state.setReferenceImport)
-  const preferences = useKoharuStore((state) => state.preferences)
+  const targetLanguage = useKoharuStore(targetLanguageOf)
   const pages = usePages(open).data ?? emptyPages
-  const languages = useMemo(
-    () => orderedLanguageChoices(preferences?.languages ?? []),
-    [preferences?.languages],
-  )
-  const targetLanguage = preferences?.pipeline.translation.target_language ?? 'en-US'
   // Until one is chosen, references are taken to be in the target language.
   const [chosenLanguage, setChosenLanguage] = useState<string | null>(null)
   const language = chosenLanguage ?? targetLanguage
@@ -334,49 +335,14 @@ export function ReferenceImportDialog() {
         </DialogHeader>
 
         <div className='grid gap-3 text-[12px] sm:grid-cols-2'>
-          <div className='grid gap-1'>
-            <span className='font-medium'>{t('references.language')}</span>
-            <Select
-              value={language}
-              items={Object.fromEntries(languages.map((choice) => [choice.tag, choice.name]))}
-              onValueChange={(value) => value && setChosenLanguage(value)}
-            >
-              <SelectTrigger
-                aria-label={t('references.language')}
-                disabled={busy}
-                className='h-8 w-full text-[11px]'
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {languages.map((choice) => (
-                  <SelectItem key={choice.tag} value={choice.tag}>
-                    {choice.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <span className='text-[11px] text-muted-foreground'>
-              {language === targetLanguage
-                ? t('references.sameLanguageHint')
-                : t('references.otherLanguageHint')}
-            </span>
-          </div>
+          <ReferenceLanguage value={language} disabled={busy} onChange={setChosenLanguage} />
           {!staged && (
-            <label className='flex items-start gap-2.5 self-start pt-5'>
-              <Checkbox
-                checked={trimMargins}
-                disabled={busy}
-                className='mt-0.5'
-                onCheckedChange={setTrimMargins}
-              />
-              <span className='grid gap-0.5'>
-                <span>{t('references.trimMargins')}</span>
-                <span className='text-[11px] text-muted-foreground'>
-                  {t('references.trimMarginsHint')}
-                </span>
-              </span>
-            </label>
+            <TrimMargins
+              checked={trimMargins}
+              disabled={busy}
+              className='self-start pt-5'
+              onChange={setTrimMargins}
+            />
           )}
         </div>
 
@@ -524,6 +490,160 @@ export function ReferenceImportDialog() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Attaches one image as the reference of one page, or replaces the one it
+ * has, without pairing anything else.
+ */
+export function ReferenceFileDialog() {
+  const { t } = useTranslation()
+  const target = useKoharuStore((state) => state.referenceFile)
+  const setTarget = useKoharuStore((state) => state.setReferenceFile)
+  const targetLanguage = useKoharuStore(targetLanguageOf)
+  const pages = usePages(target !== null).data ?? emptyPages
+  const index = pages.findIndex((page) => page.id === target)
+  const page = index >= 0 ? pages[index] : null
+  const [chosenLanguage, setChosenLanguage] = useState<string | null>(null)
+  // A replaced reference keeps its language unless another one is chosen.
+  const language = chosenLanguage ?? page?.reference?.language ?? targetLanguage
+  const [trimMargins, setTrimMargins] = useState(false)
+  const [attaching, setAttaching] = useState(false)
+  const label = page ? t('references.pageLabel', { number: index + 1, label: page.label }) : ''
+
+  const finish = () => {
+    setChosenLanguage(null)
+    setTrimMargins(false)
+    setTarget(null)
+  }
+
+  const choose = () => {
+    if (!page) return
+    const replacing = page.reference !== null
+    setAttaching(true)
+    void call(commands.attachReferenceFile, page.id, language, trimMargins)
+      .then(async (attached) => {
+        // A dismissed file dialog leaves this one open for another try.
+        if (!attached) return
+        finish()
+        await refresh(projectKey, pagesKey)
+        toast.add({
+          type: 'success',
+          title: t(replacing ? 'references.replaced' : 'references.added', { page: label }),
+        })
+      })
+      .catch(() => undefined)
+      .finally(() => setAttaching(false))
+  }
+
+  return (
+    <Dialog
+      open={page !== null}
+      onOpenChange={(open) => {
+        if (!open && !attaching) finish()
+      }}
+    >
+      <DialogContent className='sm:max-w-md'>
+        <DialogHeader>
+          <DialogTitle>
+            {page?.reference ? t('references.replaceTitle') : t('references.addTitle')}
+          </DialogTitle>
+          <DialogDescription>
+            {page?.reference
+              ? t('references.replaceDescription', { page: label })
+              : t('references.addDescription', { page: label })}
+          </DialogDescription>
+        </DialogHeader>
+        <div className='grid gap-3 text-[12px]'>
+          <ReferenceLanguage value={language} disabled={attaching} onChange={setChosenLanguage} />
+          <TrimMargins checked={trimMargins} disabled={attaching} onChange={setTrimMargins} />
+        </div>
+        <DialogFooter>
+          <Button type='button' variant='ghost' disabled={attaching} onClick={finish}>
+            {t('common.cancel')}
+          </Button>
+          <Button type='button' disabled={attaching} aria-busy={attaching} onClick={choose}>
+            {attaching ? <LoaderCircle className='animate-spin' /> : <ImagePlus />}
+            {t('references.chooseImage')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** The language a reference is written in, and what that means for its text. */
+function ReferenceLanguage({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string
+  disabled: boolean
+  onChange: (language: string) => void
+}) {
+  const { t } = useTranslation()
+  const choices = useKoharuStore((state) => state.preferences?.languages)
+  const targetLanguage = useKoharuStore(targetLanguageOf)
+  const languages = useMemo(() => orderedLanguageChoices(choices ?? []), [choices])
+  return (
+    <div className='grid gap-1'>
+      <span className='font-medium'>{t('references.language')}</span>
+      <Select
+        value={value}
+        items={Object.fromEntries(languages.map((choice) => [choice.tag, choice.name]))}
+        onValueChange={(next) => next && onChange(next)}
+      >
+        <SelectTrigger
+          aria-label={t('references.language')}
+          disabled={disabled}
+          className='h-8 w-full text-[11px]'
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {languages.map((choice) => (
+            <SelectItem key={choice.tag} value={choice.tag}>
+              {choice.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <span className='text-[11px] text-muted-foreground'>
+        {value === targetLanguage
+          ? t('references.sameLanguageHint')
+          : t('references.otherLanguageHint')}
+      </span>
+    </div>
+  )
+}
+
+function TrimMargins({
+  checked,
+  disabled,
+  className,
+  onChange,
+}: {
+  checked: boolean
+  disabled: boolean
+  className?: string
+  onChange: (checked: boolean) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <label className={cn('flex items-start gap-2.5', className)}>
+      <Checkbox
+        checked={checked}
+        disabled={disabled}
+        className='mt-0.5'
+        onCheckedChange={onChange}
+      />
+      <span className='grid gap-0.5'>
+        <span>{t('references.trimMargins')}</span>
+        <span className='text-[11px] text-muted-foreground'>{t('references.trimMarginsHint')}</span>
+      </span>
+    </label>
   )
 }
 

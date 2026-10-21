@@ -111,6 +111,8 @@ interface KoharuStore {
   settingsOpen: boolean
   cleanup: ProjectCleanup | null
   referenceImport: boolean
+  /** The page being given a reference of its own, one image at a time. */
+  referenceFile: EntityId | null
   compare: Compare
   tracing: Tracing | null
   /** The text element whose text is being picked from the page's reference. */
@@ -123,6 +125,7 @@ interface KoharuStore {
   setSettingsOpen: (open: boolean) => void
   setCleanup: (cleanup: ProjectCleanup | null) => void
   setReferenceImport: (open: boolean) => void
+  setReferenceFile: (page: EntityId | null) => void
   setCompareOpen: (open: boolean) => void
   setCompareMode: (mode: CompareMode) => void
   setComparePeeking: (peeking: boolean) => void
@@ -224,6 +227,7 @@ export const useKoharuStore = create<KoharuStore>()((set, get) => ({
   settingsOpen: false,
   cleanup: null,
   referenceImport: false,
+  referenceFile: null,
   compare: {
     open: false,
     mode: rememberedCompareMode(),
@@ -241,6 +245,7 @@ export const useKoharuStore = create<KoharuStore>()((set, get) => ({
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setCleanup: (cleanup) => set({ cleanup }),
   setReferenceImport: (referenceImport) => set({ referenceImport }),
+  setReferenceFile: (referenceFile) => set({ referenceFile }),
   // Compare, aligning a reference, and picking reference text all draw over
   // the canvas, so each closes the others. Aligning is left only after
   // asking about an unsaved alignment.

@@ -58,6 +58,20 @@ struct StagedReference {
     thumbnail: Vec<u8>,
 }
 
+impl StagedReference {
+    fn asset(&self) -> AssetInput {
+        AssetInput::new(
+            self.bytes.clone(),
+            self.media_type,
+            AssetMetadata {
+                width: Some(self.width),
+                height: Some(self.height),
+                attributes: Default::default(),
+            },
+        )
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Type)]
 pub struct ReferenceCandidate {
     pub name: String,
@@ -160,21 +174,63 @@ pub(crate) async fn attach_references(
                 let image = images
                     .get(pair.reference as usize)
                     .with_context(|| format!("reference {} is not staged", pair.reference))?;
-                Ok((
-                    pair.page,
-                    AssetInput::new(
-                        image.bytes.clone(),
-                        image.media_type,
-                        AssetMetadata {
-                            width: Some(image.width),
-                            height: Some(image.height),
-                            attributes: Default::default(),
-                        },
-                    ),
-                ))
+                Ok((pair.page, image.asset()))
             })
             .collect::<Result<Vec<_>>>()?
     };
+    attach(references, language, &desktop, &project, &canvas_channel).await?;
+    staged.images.lock().clear();
+    Ok(())
+}
+
+/// Asks for one image and attaches it as `page`'s reference in one undoable
+/// step, in place of any it has, without staging. `false` means the dialog
+/// was dismissed.
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "reference_attached",
+    skip_all,
+    fields(origin = "user")
+)]
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn attach_reference_file(
+    page: EntityId,
+    language: String,
+    trim_margins: bool,
+    window: WebviewWindow<CefRuntime>,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    processing: State<'_, Processing>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> std::result::Result<bool, Error> {
+    refuse_while_processing(&processing)?;
+    let language = LanguageTag::new(language)?;
+    let Some(path) = import::pick_image(&window).await else {
+        return Ok(false);
+    };
+    let image =
+        tokio_rayon::spawn(move || prepare(import::read_image(&path)?, trim_margins)).await?;
+    attach(
+        vec![(page, image.asset())],
+        language,
+        &desktop,
+        &project,
+        &canvas_channel,
+    )
+    .await?;
+    Ok(true)
+}
+
+/// Attaches references to pages in one undoable step and shows the result.
+async fn attach(
+    references: Vec<(EntityId, AssetInput)>,
+    language: LanguageTag,
+    desktop: &Desktop,
+    project: &CurrentProject,
+    canvas_channel: &CanvasChannel,
+) -> Result<()> {
     let (commit, page) = {
         let mut project = project.project.lock().await;
         let project = project.as_mut().context("no project is open")?;
@@ -182,7 +238,6 @@ pub(crate) async fn attach_references(
         project.record_commit(&commit);
         (commit, project.active_page())
     };
-    staged.images.lock().clear();
     desktop.synchronize(&commit.snapshot, page, &commit).await?;
     canvas_channel.channel.publish(desktop.canvas_state());
     Ok(())

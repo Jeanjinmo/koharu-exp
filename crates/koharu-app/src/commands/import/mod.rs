@@ -83,6 +83,31 @@ fn decode(path: &Path, source: EncodedPage) -> Result<Page> {
     })
 }
 
+/// Asks for one image file. `None` means the dialog was dismissed.
+pub(super) async fn pick_image(window: &WebviewWindow<CefRuntime>) -> Option<PathBuf> {
+    rfd::AsyncFileDialog::new()
+        .add_filter("Images", Format::Raster.get_serializations())
+        .set_parent(window)
+        .pick_file()
+        .await
+        .map(|file| file.path().to_owned())
+}
+
+/// Reads one image file, named after the file.
+pub(super) fn read_image(path: &Path) -> Result<Page> {
+    decode(path, image_file(path)?)
+}
+
+fn image_file(path: &Path) -> Result<EncodedPage> {
+    Ok(EncodedPage {
+        name: path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "page".to_owned()),
+        bytes: fs::read(path).with_context(|| format!("failed to read {}", path.display()))?,
+    })
+}
+
 /// Asks for image, archive, and PDF files, or a folder of them. `None`
 /// means the dialog was dismissed.
 pub(super) async fn pick(
@@ -153,14 +178,7 @@ pub(super) fn import<T: Send>(
                 Ok(())
             };
             match extension {
-                Some(Format::Raster) => visit(EncodedPage {
-                    name: path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "page".to_owned()),
-                    bytes: fs::read(&path)
-                        .with_context(|| format!("failed to read {}", path.display()))?,
-                })?,
+                Some(Format::Raster) => visit(image_file(&path)?)?,
                 Some(Format::Zip) => zip::extract(&path)?.into_iter().try_for_each(visit)?,
                 Some(Format::Rar) => rar::extract(&path)?.into_iter().try_for_each(visit)?,
                 Some(Format::Pdf) => pdf::render(&path, &mut visit)?,
