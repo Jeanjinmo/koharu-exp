@@ -183,6 +183,8 @@ function rememberCompareMode(mode: CompareMode): void {
 
 /** How many placements one aligning session can undo. */
 const TRACING_HISTORY = 100
+/** The reference's opacity when aligning starts, and what resetting it returns to. */
+export const TRACING_OPACITY = 0.5
 
 export const useKoharuStore = create<KoharuStore>()((set, get) => ({
   initialized: false,
@@ -257,7 +259,7 @@ export const useKoharuStore = create<KoharuStore>()((set, get) => ({
               page,
               placement,
               changed: false,
-              opacity: state.tracing?.opacity ?? 0.5,
+              opacity: state.tracing?.opacity ?? TRACING_OPACITY,
               undo: [],
               redo: [],
               leaving: null,

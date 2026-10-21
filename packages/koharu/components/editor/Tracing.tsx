@@ -1,13 +1,13 @@
 'use client'
 
-import { Minus, Plus, X } from 'lucide-react'
+import { Minus, Plus, RotateCcw, X } from 'lucide-react'
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PlacedImage, placedRect, usePageImage } from '@/components/editor/Compare'
 import { call } from '@/lib/backend'
 import { pagesKey, projectKey, refresh, usePages } from '@/lib/queries'
-import { useKoharuStore } from '@/lib/store'
+import { TRACING_OPACITY, useKoharuStore } from '@/lib/store'
 import { commands, type Page, type ReferencePlacement } from '@koharu/bridge/protocol'
 import {
   AlertDialog,
@@ -220,22 +220,31 @@ export function TracingPanel({ page }: { page: Page }) {
   const placement = tracing.placement
   const rect = placement && placedRect(placement, page.size)
 
+  // This page and every later one with a reference, counted before Save is
+  // chosen so its label can say how far it reaches.
+  const following = (pages ?? [])
+    .slice(index)
+    .filter((candidate) => candidate.reference)
+    .map((candidate) => candidate.id)
+
   const finish = (targets: string[]) => {
     if (!placement) return
-    void savePlacement(targets, placement)
-      .then(() => {
-        stopTracing()
-        if (targets.length > 1) {
-          toast.add({ type: 'success', title: t('tracing.applied', { count: targets.length }) })
-        }
+    const close = () => {
+      stopTracing()
+      toast.add({
+        type: 'success',
+        title: t('tracing.saved', { count: targets.length, page: page.label }),
       })
+    }
+    // An unchanged alignment of this page alone is already saved.
+    if (!tracing.changed && targets.length === 1) {
+      close()
+      return
+    }
+    void savePlacement(targets, placement)
+      .then(close)
       .catch(() => undefined)
   }
-  const following = () =>
-    (pages ?? [])
-      .slice(index)
-      .filter((candidate) => candidate.reference)
-      .map((candidate) => candidate.id)
 
   // Answers the question asked before leaving with an unsaved alignment.
   const leave = (save: boolean) => {
@@ -300,17 +309,36 @@ export function TracingPanel({ page }: { page: Page }) {
       {placement && rect ? (
         <>
           <div className='flex flex-wrap items-end gap-2'>
-            <label className='grid gap-0.5'>
+            <div className='grid gap-0.5'>
               <span className='text-[10px] text-muted-foreground'>{t('tracing.opacity')}</span>
-              <input
-                type='range'
-                min={10}
-                max={90}
-                value={Math.round(tracing.opacity * 100)}
-                className='h-6 w-24 accent-primary'
-                onChange={(event) => setOpacity(event.currentTarget.valueAsNumber / 100)}
-              />
-            </label>
+              <div className='flex items-center gap-1'>
+                <input
+                  type='range'
+                  min={10}
+                  max={90}
+                  aria-label={t('tracing.opacity')}
+                  title={t('tracing.opacityHint', { percent: TRACING_OPACITY * 100 })}
+                  value={Math.round(tracing.opacity * 100)}
+                  className='h-6 w-24 accent-primary'
+                  onChange={(event) => setOpacity(event.currentTarget.valueAsNumber / 100)}
+                  onDoubleClick={() => setOpacity(TRACING_OPACITY)}
+                />
+                <span className='w-8 text-right tabular-nums'>
+                  {Math.round(tracing.opacity * 100)}%
+                </span>
+                <Button
+                  type='button'
+                  size='icon-xs'
+                  variant='ghost'
+                  aria-label={t('tracing.resetOpacity', { percent: TRACING_OPACITY * 100 })}
+                  title={t('tracing.resetOpacity', { percent: TRACING_OPACITY * 100 })}
+                  disabled={tracing.opacity === TRACING_OPACITY}
+                  onClick={() => setOpacity(TRACING_OPACITY)}
+                >
+                  <RotateCcw />
+                </Button>
+              </div>
+            </div>
             <div className='grid gap-0.5'>
               <span className='text-[10px] text-muted-foreground'>{t('tracing.size')}</span>
               <div className='flex items-center'>
@@ -359,22 +387,26 @@ export function TracingPanel({ page }: { page: Page }) {
           </div>
           <p className='text-[10px] text-muted-foreground'>{t('tracing.hint')}</p>
           <div className='flex flex-wrap gap-1.5'>
-            <Button type='button' size='xs' variant='ghost' onClick={() => moveTracing(FILL)}>
+            <Button
+              type='button'
+              size='xs'
+              variant='ghost'
+              title={t('tracing.resetHint')}
+              onClick={() => moveTracing(FILL)}
+            >
               {t('tracing.reset')}
-            </Button>
-            <Button type='button' size='xs' variant='ghost' onClick={() => finish(following())}>
-              {t('tracing.applyFollowing')}
             </Button>
             <span className='flex-1' />
             <Button type='button' size='xs' variant='ghost' onClick={stopTracing}>
               {t('common.cancel')}
             </Button>
-            <Button
-              type='button'
-              size='xs'
-              onClick={() => (tracing.changed ? finish([page.id]) : stopTracing())}
-            >
-              {t('tracing.save')}
+            {following.length > 1 && (
+              <Button type='button' size='xs' variant='outline' onClick={() => finish(following)}>
+                {t('tracing.saveFollowing', { count: following.length - 1 })}
+              </Button>
+            )}
+            <Button type='button' size='xs' onClick={() => finish([page.id])}>
+              {t('tracing.saveThis')}
             </Button>
           </div>
         </>

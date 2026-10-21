@@ -12,6 +12,7 @@ import {
   type PageSummary,
   type ReferencePlacement,
 } from '@koharu/bridge/protocol'
+import { toast } from '@koharu/ui/components/toast'
 import { TooltipProvider } from '@koharu/ui/components/tooltip'
 
 const canvas = vi.hoisted(() => ({
@@ -157,22 +158,59 @@ describe('aligning a reference', () => {
     const moved = useKoharuStore.getState().tracing!.placement!
     expect(moved.x).toBeCloseTo(0.11)
     expect(moved.y).toBeCloseTo(10 / 1500)
-    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getByRole('button', { name: 'Save (this page)' }))
 
     expect(save).toHaveBeenCalledWith(['one'], moved)
     await waitFor(() => expect(useKoharuStore.getState().tracing).toBeNull())
   })
 
-  it('applies one alignment to the following pages that have a reference', async () => {
+  it('names how far each save reaches and always reports it', async () => {
     const user = userEvent.setup()
     const save = vi.spyOn(commands, 'setReferencePlacement').mockResolvedValue(null)
+    const notice = vi.spyOn(toast, 'add')
     renderEditor()
     act(() => useKoharuStore.getState().startTracing('one', shifted))
 
-    await user.click(await screen.findByRole('button', { name: 'Fit to page' }))
-    await user.click(screen.getByRole('button', { name: 'Apply to following pages' }))
+    // Saving an unchanged alignment has nothing to write, but still says so.
+    await user.click(await screen.findByRole('button', { name: 'Save (this page)' }))
+    expect(save).not.toHaveBeenCalled()
+    expect(notice).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Alignment saved for one' }),
+    )
+
+    // Page two has no reference, so only page three follows.
+    act(() => useKoharuStore.getState().startTracing('one', shifted))
+    const fit = await screen.findByRole('button', { name: 'Fit to page' })
+    expect(fit).toHaveAttribute('title', 'Reset to the page size and position')
+    await user.click(fit)
+    await user.click(screen.getByRole('button', { name: 'Save for this and 1 following page' }))
 
     expect(save).toHaveBeenCalledWith(['one', 'three'], { x: 0, y: 0, width: 1, height: 1 })
+    await waitFor(() =>
+      expect(notice).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Alignment saved for 2 pages' }),
+      ),
+    )
+  })
+
+  it('shows the reference opacity and resets it to half', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    act(() => useKoharuStore.getState().startTracing('one', shifted))
+    const opacity = await screen.findByRole('slider', { name: 'Reference opacity' })
+    const reset = screen.getByRole('button', { name: 'Reset opacity to 50%' })
+    expect(screen.getByText('50%')).toBeInTheDocument()
+    expect(reset).toBeDisabled()
+
+    fireEvent.change(opacity, { target: { value: '70' } })
+    expect(screen.getByText('70%')).toBeInTheDocument()
+    await user.click(reset)
+    expect(useKoharuStore.getState().tracing!.opacity).toBe(0.5)
+
+    fireEvent.change(opacity, { target: { value: '30' } })
+    fireEvent.doubleClick(opacity)
+    expect(useKoharuStore.getState().tracing!.opacity).toBe(0.5)
+    expect(screen.getByText('50%')).toBeInTheDocument()
   })
 
   it('saves a changed alignment when another page is shown', async () => {
