@@ -1,8 +1,15 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, FilePlus2, FolderOpen, LoaderCircle } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import {
+  ArrowRight,
+  ArrowUpDown,
+  ChevronDown,
+  FilePlus2,
+  FolderOpen,
+  LoaderCircle,
+} from 'lucide-react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PageThumbnail } from '@/components/editor/PageRail'
@@ -27,6 +34,14 @@ import {
   DialogTitle,
 } from '@koharu/ui/components/dialog'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@koharu/ui/components/dropdown-menu'
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -34,8 +49,19 @@ import {
   SelectValue,
 } from '@koharu/ui/components/select'
 import { toast } from '@koharu/ui/components/toast'
+import { cn } from '@koharu/ui/lib/utils'
 
 const emptyPages: PageSummary[] = []
+
+/** Which staged reference each page gets, by its position among the staged images. */
+export type Pairs = ReadonlyMap<string, number>
+
+export type ShiftDirection = 'up' | 'down'
+
+const noPairs: Pairs = new Map()
+
+/** How many characters at the end of a long name stay in view. */
+const NAME_TAIL = 12
 
 interface Staged {
   /** Tells thumbnails of one staging apart from those of the one before. */
@@ -43,30 +69,130 @@ interface Staged {
   candidates: ReferenceCandidate[]
 }
 
-interface Pairing {
-  rows: Array<{ page: PageSummary; reference: number | null }>
-  leftover: number[]
+/**
+ * The parts of a file name that hold a number, which usually tell pages
+ * apart, without leading zeros so `p01` and `p1` agree.
+ */
+function nameMarks(name: string): string[] {
+  return name
+    .replace(/\.[a-z][a-z0-9]{0,4}$/i, '')
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((part) => /\d/.test(part))
+    .map((part) => part.replace(/\d+/g, (digits) => digits.replace(/^0+(?=\d)/, '')))
+}
+
+/** Each name's marks without those every name on its side shares, such as an episode number. */
+function distinctMarks(marks: readonly string[][]): string[][] {
+  if (marks.length < 2) return marks.map((parts) => [...parts])
+  const shared = marks.reduce((common, parts) => common.filter((part) => parts.includes(part)))
+  return marks.map((parts) => parts.filter((part) => !shared.includes(part)))
 }
 
 /**
- * Pairs references with pages in order. A skipped reference is left out, and
- * a page marked as a gap gets none, so either shifts the references after it.
+ * Pairs a page with the reference whose name carries the same page marks,
+ * such as `E33P01` in `ja_…_E33P01.jpg` and `id_…_E33P01.jpg`, when that is
+ * the only reference that fits the page and it fits no other page. The pages
+ * and references left over pair in order.
  */
-export function pairReferences(
-  pages: readonly PageSummary[],
-  count: number,
-  skipped: ReadonlySet<number>,
-  gaps: ReadonlySet<string>,
-): Pairing {
-  let next = 0
-  const take = () => {
-    while (next < count && skipped.has(next)) next += 1
-    return next < count ? next++ : null
+export function pairReferences(pages: readonly PageSummary[], names: readonly string[]): Pairs {
+  const pageMarks = pages.map((page) => nameMarks(page.label))
+  const referenceMarks = names.map(nameMarks)
+  const pageKeys = distinctMarks(pageMarks)
+  const referenceKeys = distinctMarks(referenceMarks)
+  const within = (key: string[], marks: string[]) =>
+    key.length > 0 && key.every((mark) => marks.includes(mark))
+  const fits = pages.map((_, page) =>
+    names.flatMap((_, reference) =>
+      within(pageKeys[page], referenceMarks[reference]) &&
+      within(referenceKeys[reference], pageMarks[page])
+        ? [reference]
+        : [],
+    ),
+  )
+  const claims = new Map<number, number>()
+  for (const reference of fits.flat()) claims.set(reference, (claims.get(reference) ?? 0) + 1)
+
+  const pairs = new Map<string, number>()
+  pages.forEach((page, index) => {
+    const found = fits[index]
+    if (found.length === 1 && claims.get(found[0]) === 1) pairs.set(page.id, found[0])
+  })
+  const named = new Set(pairs.values())
+  const rest = names.map((_, reference) => reference).filter((reference) => !named.has(reference))
+  for (const page of pages) {
+    if (pairs.has(page.id)) continue
+    const reference = rest.shift()
+    if (reference === undefined) break
+    pairs.set(page.id, reference)
   }
-  const rows = pages.map((page) => ({ page, reference: gaps.has(page.id) ? null : take() }))
-  const leftover: number[] = []
-  for (let reference = take(); reference !== null; reference = take()) leftover.push(reference)
-  return { rows, leftover }
+  return pairs
+}
+
+/**
+ * Puts a reference on a page. The reference that was there takes the place
+ * the moved one came from: its page, or the references not paired.
+ */
+export function moveReference(pairs: Pairs, reference: number, page: string): Pairs {
+  const from = [...pairs].find(([, paired]) => paired === reference)?.[0]
+  const displaced = pairs.get(page)
+  const next = new Map(pairs)
+  next.set(page, reference)
+  if (from !== undefined && from !== page) {
+    if (displaced === undefined) next.delete(from)
+    else next.set(from, displaced)
+  }
+  return next
+}
+
+/**
+ * Moves every reference from a page on by one page. Up leaves out the page's
+ * own reference, and the last page then takes the reference that followed its
+ * own in file order unless a page has it. Down leaves the page without one,
+ * and the last page's reference drops out. `shifted` counts the references
+ * that changed page, apart from one left out.
+ */
+export function shiftReferences(
+  pages: readonly PageSummary[],
+  pairs: Pairs,
+  page: string,
+  direction: ShiftDirection,
+  count: number,
+): { pairs: Pairs; shifted: number } {
+  const at = pages.findIndex((each) => each.id === page)
+  if (at < 0) return { pairs, shifted: 0 }
+  const rows = pages.map((each) => pairs.get(each.id) ?? null)
+  let next: Array<number | null>
+  let left: number | null = null
+  if (direction === 'up') {
+    left = rows[at]
+    const last = rows[rows.length - 1]
+    let following: number | null = null
+    if (last !== null) {
+      for (let reference = last + 1; reference < count && following === null; reference += 1) {
+        if (!rows.includes(reference)) following = reference
+      }
+    }
+    next = [...rows.slice(0, at), ...rows.slice(at + 1), following]
+  } else {
+    next = [...rows.slice(0, at), null, ...rows.slice(at, -1)]
+  }
+  const references = new Set(
+    [...rows, ...next].filter(
+      (reference): reference is number => reference !== null && reference !== left,
+    ),
+  )
+  return {
+    pairs: new Map(
+      pages.flatMap((each, row) => {
+        const reference = next[row]
+        return reference === null ? [] : [[each.id, reference] as const]
+      }),
+    ),
+    shifted: [...references].filter(
+      (reference) => rows.indexOf(reference) !== next.indexOf(reference),
+    ).length,
+  }
 }
 
 /** Imports a translated edition of the project and pairs it with the pages. */
@@ -88,26 +214,72 @@ export function ReferenceImportDialog() {
   const [reading, setReading] = useState(false)
   const [attaching, setAttaching] = useState(false)
   const [staged, setStaged] = useState<Staged | null>(null)
-  const [skipped, setSkipped] = useState<ReadonlySet<number>>(new Set())
-  const [gaps, setGaps] = useState<ReadonlySet<string>>(new Set())
+  const [pairs, setPairs] = useState<Pairs>(noPairs)
+  // The last shift, so its notice can take it back.
+  const [shift, setShift] = useState<{ shifted: number; before: Pairs } | null>(null)
+  const [dragged, setDragged] = useState<number | null>(null)
+  const [target, setTarget] = useState<string | null>(null)
+  const notPairedLabel = useId()
 
-  const pairing = useMemo(
-    () => pairReferences(pages, staged?.candidates.length ?? 0, skipped, gaps),
-    [gaps, pages, skipped, staged],
-  )
-  const pairs = pairing.rows.flatMap(({ page, reference }) =>
+  const rows = pages.map((page) => ({ page, reference: pairs.get(page.id) ?? null }))
+  const chosen = rows.flatMap(({ page, reference }) =>
     reference === null ? [] : [{ page: page.id, reference }],
+  )
+  const paired = new Set(chosen.map(({ reference }) => reference))
+  const unpaired = (staged?.candidates ?? []).flatMap((_, reference) =>
+    paired.has(reference) ? [] : [reference],
   )
   const busy = reading || attaching
 
+  const arrange = (next: Pairs) => {
+    setPairs(next)
+    setShift(null)
+  }
+
+  const unpair = (page: string) => {
+    const next = new Map(pairs)
+    next.delete(page)
+    arrange(next)
+  }
+
+  const shiftFrom = (page: string, direction: ShiftDirection) => {
+    const result = shiftReferences(pages, pairs, page, direction, staged?.candidates.length ?? 0)
+    setPairs(result.pairs)
+    setShift(result.shifted > 0 ? { shifted: result.shifted, before: pairs } : null)
+  }
+
+  const drag = (reference: number | null) => {
+    setDragged(reference)
+    if (reference === null) setTarget(null)
+  }
+
+  const drop = (page: string | null) => {
+    if (dragged !== null) {
+      if (page !== null) {
+        arrange(moveReference(pairs, dragged, page))
+      } else {
+        const from = [...pairs].find(([, reference]) => reference === dragged)?.[0]
+        if (from !== undefined) unpair(from)
+      }
+    }
+    drag(null)
+  }
+
+  const reset = () => {
+    setPairs(noPairs)
+    setShift(null)
+  }
+
   const discard = () => {
     setStaged(null)
+    reset()
     void call(commands.discardStagedReferences).catch(() => undefined)
   }
 
   const finish = () => {
     setChosenLanguage(null)
     setTrimMargins(false)
+    reset()
     setOpen(false)
   }
 
@@ -122,8 +294,13 @@ export function ReferenceImportDialog() {
     void call(commands.stageReferences, source, trimMargins)
       .then((candidates) => {
         if (!candidates) return
-        setSkipped(new Set())
-        setGaps(new Set())
+        setPairs(
+          pairReferences(
+            pages,
+            candidates.map((candidate) => candidate.name),
+          ),
+        )
+        setShift(null)
         setStaged((previous) => ({ generation: (previous?.generation ?? 0) + 1, candidates }))
       })
       .catch(() => undefined)
@@ -132,21 +309,15 @@ export function ReferenceImportDialog() {
 
   const attach = () => {
     setAttaching(true)
-    void call(commands.attachReferences, pairs, language)
+    void call(commands.attachReferences, chosen, language)
       .then(async () => {
         setStaged(null)
         finish()
         await refresh(projectKey, pagesKey)
-        toast.add({ type: 'success', title: t('references.attached', { count: pairs.length }) })
+        toast.add({ type: 'success', title: t('references.attached', { count: chosen.length }) })
       })
       .catch(() => undefined)
       .finally(() => setAttaching(false))
-  }
-
-  const toggle = <T,>(values: ReadonlySet<T>, value: T) => {
-    const next = new Set(values)
-    if (!next.delete(value)) next.add(value)
-    return next
   }
 
   return (
@@ -211,44 +382,96 @@ export function ReferenceImportDialog() {
 
         {staged ? (
           <section aria-label={t('references.pairs')} className='grid min-h-0 gap-2'>
-            <p className='text-[11px] text-muted-foreground' role='status'>
-              {t('references.summary', { count: pairs.length, pages: pages.length })}
-              {pairing.leftover.length > 0 &&
-                ` · ${t('references.leftover', { count: pairing.leftover.length })}`}
-            </p>
+            <div className='flex flex-wrap items-center gap-x-2 text-[11px]'>
+              <p className='text-muted-foreground' role='status'>
+                {t('references.summary', { count: chosen.length, pages: pages.length })}
+                {unpaired.length > 0 &&
+                  ` · ${t('references.notPaired', { count: unpaired.length })}`}
+              </p>
+              {shift && (
+                <p className='flex items-center gap-1.5'>
+                  {t('references.shifted', { count: shift.shifted })}
+                  <Button
+                    type='button'
+                    size='xs'
+                    variant='link'
+                    className='h-auto px-0 text-[11px]'
+                    disabled={busy}
+                    onClick={() => {
+                      setPairs(shift.before)
+                      setShift(null)
+                    }}
+                  >
+                    {t('references.undoShift')}
+                  </Button>
+                </p>
+              )}
+            </div>
             <ol className='min-h-0 overflow-y-auto rounded-lg border border-border/70'>
-              {pairing.rows.map(({ page, reference }, index) => (
+              {rows.map(({ page, reference }, index) => (
                 <PairRow
                   key={page.id}
                   page={page}
                   number={index + 1}
                   reference={reference}
                   staged={staged}
-                  gap={gaps.has(page.id)}
+                  pages={pages}
                   disabled={busy}
-                  onSkip={() => reference !== null && setSkipped(toggle(skipped, reference))}
-                  onGap={() => setGaps(toggle(gaps, page.id))}
+                  dragging={dragged !== null}
+                  dropping={dragged !== null && target === page.id}
+                  onDrag={drag}
+                  onTarget={setTarget}
+                  onDrop={() => drop(page.id)}
+                  onPair={(moved, to) => arrange(moveReference(pairs, moved, to))}
+                  onUnpair={() => unpair(page.id)}
+                  onShift={(direction) => shiftFrom(page.id, direction)}
                 />
               ))}
             </ol>
-            {skipped.size > 0 && (
-              <div className='flex flex-wrap items-center gap-1.5 text-[11px]'>
-                <span className='text-muted-foreground'>{t('references.skipped')}</span>
-                {[...skipped]
-                  .sort((left, right) => left - right)
-                  .map((reference) => (
-                    <Button
-                      key={reference}
-                      type='button'
-                      size='xs'
-                      variant='outline'
+            {unpaired.length > 0 && (
+              <div
+                role='group'
+                aria-labelledby={notPairedLabel}
+                className={cn(
+                  'flex flex-wrap items-center gap-1.5 rounded-lg text-[11px]',
+                  dragged !== null && 'outline-1 outline-offset-2 outline-border outline-dashed',
+                )}
+                onDragOver={(event) => {
+                  if (dragged !== null) event.preventDefault()
+                }}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  drop(null)
+                }}
+              >
+                <span id={notPairedLabel} className='text-muted-foreground'>
+                  {t('references.notPairedList')}
+                </span>
+                {unpaired.map((reference) => (
+                  <span
+                    key={reference}
+                    draggable={!busy}
+                    title={t('references.dragHint')}
+                    className='flex max-w-64 cursor-grab items-center gap-1 rounded-md border border-border/70 py-0.5 pr-0.5 pl-1 active:cursor-grabbing'
+                    onDragStart={() => drag(reference)}
+                    onDragEnd={() => drag(null)}
+                  >
+                    <span className='grid h-8 w-6 shrink-0 place-items-center overflow-hidden rounded-sm bg-[var(--surface-well)]'>
+                      <StagedThumbnail
+                        staged={staged}
+                        reference={reference}
+                        label={staged.candidates[reference].name}
+                      />
+                    </span>
+                    <FileName name={staged.candidates[reference].name} />
+                    <PairMenu
+                      pages={pages}
+                      page={null}
                       disabled={busy}
-                      title={t('references.restore')}
-                      onClick={() => setSkipped(toggle(skipped, reference))}
-                    >
-                      {staged.candidates[reference]?.name}
-                    </Button>
-                  ))}
+                      onPair={(page) => arrange(moveReference(pairs, reference, page))}
+                    />
+                  </span>
+                ))}
               </div>
             )}
           </section>
@@ -291,12 +514,12 @@ export function ReferenceImportDialog() {
           </Button>
           <Button
             type='button'
-            disabled={busy || pairs.length === 0}
+            disabled={busy || chosen.length === 0}
             aria-busy={attaching}
             onClick={attach}
           >
             {attaching && <LoaderCircle className='animate-spin' />}
-            {t('references.attach', { count: pairs.length })}
+            {t('references.attach', { count: chosen.length })}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -309,19 +532,31 @@ function PairRow({
   number,
   reference,
   staged,
-  gap,
+  pages,
   disabled,
-  onSkip,
-  onGap,
+  dragging,
+  dropping,
+  onDrag,
+  onTarget,
+  onDrop,
+  onPair,
+  onUnpair,
+  onShift,
 }: {
   page: PageSummary
   number: number
   reference: number | null
   staged: Staged
-  gap: boolean
+  pages: readonly PageSummary[]
   disabled: boolean
-  onSkip: () => void
-  onGap: () => void
+  dragging: boolean
+  dropping: boolean
+  onDrag: (reference: number | null) => void
+  onTarget: (page: string | null) => void
+  onDrop: () => void
+  onPair: (reference: number, page: string) => void
+  onUnpair: () => void
+  onShift: (direction: ShiftDirection) => void
 }) {
   const { t } = useTranslation()
   const candidate = reference === null ? null : staged.candidates[reference]
@@ -329,7 +564,20 @@ function PairRow({
   return (
     <li
       aria-label={label}
-      className='grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/60 px-2 py-1.5 last:border-b-0'
+      data-drop={dropping}
+      className='grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/60 px-2 py-1.5 last:border-b-0 data-[drop=true]:bg-primary/[0.09]'
+      onDragOver={(event) => {
+        if (!dragging) return
+        event.preventDefault()
+        onTarget(page.id)
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onTarget(null)
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        onDrop()
+      }}
     >
       <div className='flex min-w-0 items-center gap-2'>
         <div className='grid h-12 w-9 shrink-0 place-items-center overflow-hidden rounded bg-[var(--surface-well)]'>
@@ -337,53 +585,135 @@ function PairRow({
             <PageThumbnail page={page.id} asset={page.source_asset} label={page.label} />
           )}
         </div>
-        <span className='min-w-0 truncate text-[11px]'>{label}</span>
+        <FileName name={label} className='text-[11px]' />
       </div>
       <ArrowRight className='size-3.5 text-muted-foreground' />
-      <div className='flex min-w-0 items-center gap-2'>
-        {candidate && reference !== null ? (
-          <>
-            <div className='grid h-12 w-9 shrink-0 place-items-center overflow-hidden rounded bg-[var(--surface-well)]'>
-              <StagedThumbnail staged={staged} reference={reference} label={candidate.name} />
-            </div>
-            <span className='grid min-w-0 text-[11px]'>
-              <span className='truncate'>{candidate.name}</span>
-              {page.reference && (
-                <span className='truncate text-[10px] text-muted-foreground'>
-                  {t('references.replaces')}
-                </span>
-              )}
-            </span>
-          </>
-        ) : (
-          <span className='text-[11px] text-muted-foreground'>{t('references.none')}</span>
-        )}
-      </div>
-      <div className='flex gap-1'>
-        {candidate && (
-          <Button
-            type='button'
-            size='xs'
-            variant='ghost'
-            disabled={disabled}
-            title={t('references.skipHint')}
-            onClick={onSkip}
-          >
-            {t('references.skip')}
-          </Button>
-        )}
-        <Button
-          type='button'
-          size='xs'
-          variant='ghost'
-          disabled={disabled}
-          title={gap ? undefined : t('references.gapHint')}
-          onClick={onGap}
+      {candidate && reference !== null ? (
+        <div
+          draggable={!disabled}
+          title={t('references.dragHint')}
+          className='flex min-w-0 cursor-grab items-center gap-2 active:cursor-grabbing'
+          onDragStart={() => onDrag(reference)}
+          onDragEnd={() => onDrag(null)}
         >
-          {gap ? t('references.pairAgain') : t('references.gap')}
-        </Button>
+          <div className='grid h-12 w-9 shrink-0 place-items-center overflow-hidden rounded bg-[var(--surface-well)]'>
+            <StagedThumbnail staged={staged} reference={reference} label={candidate.name} />
+          </div>
+          <span className='grid min-w-0 text-[11px]'>
+            <FileName name={candidate.name} />
+            {page.reference && (
+              <span className='truncate text-[10px] text-muted-foreground'>
+                {t('references.replaces')}
+              </span>
+            )}
+          </span>
+        </div>
+      ) : (
+        <span className='text-[11px] text-muted-foreground'>{t('references.none')}</span>
+      )}
+      <div className='flex w-36 items-center justify-end gap-1'>
+        {reference !== null && (
+          <>
+            <PairMenu
+              pages={pages}
+              page={page.id}
+              disabled={disabled}
+              onPair={(to) => onPair(reference, to)}
+            />
+            <Button
+              type='button'
+              size='xs'
+              variant='ghost'
+              disabled={disabled}
+              title={t('references.unpairHint')}
+              onClick={onUnpair}
+            >
+              {t('references.unpair')}
+            </Button>
+          </>
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={<Button type='button' size='xs' variant='ghost' disabled={disabled} />}
+          >
+            {t('references.shift')}
+            <ChevronDown />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align='end' className='w-64'>
+            <DropdownMenuItem className='grid gap-0.5 text-[11px]' onClick={() => onShift('up')}>
+              <span>
+                {reference === null ? t('references.shiftUp') : t('references.skipShiftUp')}
+              </span>
+              <span className='text-[10px] text-muted-foreground'>
+                {reference === null ? t('references.shiftUpHint') : t('references.skipShiftUpHint')}
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem className='grid gap-0.5 text-[11px]' onClick={() => onShift('down')}>
+              <span>{t('references.emptyShiftDown')}</span>
+              <span className='text-[10px] text-muted-foreground'>
+                {t('references.emptyShiftDownHint')}
+              </span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </li>
+  )
+}
+
+/** Lists the pages, so a reference goes to any of them in one step. */
+function PairMenu({
+  pages,
+  page,
+  disabled,
+  onPair,
+}: {
+  pages: readonly PageSummary[]
+  page: string | null
+  disabled: boolean
+  onPair: (page: string) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type='button'
+            size='icon-xs'
+            variant='ghost'
+            disabled={disabled}
+            aria-label={t('references.pairWith')}
+            title={t('references.pairWith')}
+          />
+        }
+      >
+        <ArrowUpDown />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align='end' className='w-72'>
+        <DropdownMenuRadioGroup value={page} onValueChange={(next) => onPair(next as string)}>
+          {pages.map((each, index) => (
+            <DropdownMenuRadioItem key={each.id} value={each.id} className='text-[11px]'>
+              <FileName
+                name={t('references.pageLabel', { number: index + 1, label: each.label })}
+              />
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/** Keeps the end of a long name in view, where page numbers usually are. */
+function FileName({ name, className }: { name: string; className?: string }) {
+  return (
+    <span title={name} className={cn('flex min-w-0', className)}>
+      <span className='overflow-hidden text-ellipsis whitespace-pre'>
+        {name.slice(0, -NAME_TAIL)}
+      </span>
+      <span className='shrink-0 whitespace-pre'>{name.slice(-NAME_TAIL)}</span>
+    </span>
   )
 }
 
