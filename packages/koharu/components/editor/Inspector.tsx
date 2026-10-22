@@ -912,7 +912,7 @@ function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void 
               data-testid={`edit-source-${layer.id}`}
               aria-label={t('layers.sourceLabel', { name })}
               wrap='soft'
-              className='max-h-14 min-h-8 w-full max-w-full min-w-0 resize-y overflow-y-auto rounded-md bg-background px-1.5 py-1 text-[12px] leading-4 md:text-[12px]'
+              className='max-h-52 min-h-8 w-full max-w-full min-w-0 resize-y overflow-y-auto rounded-md bg-background px-1.5 py-1 text-[12px] leading-4 md:text-[12px]'
               value={layer.content.source?.text ?? ''}
               onCommit={(text) =>
                 void call(commands.setSourceText, layer.id, text)
@@ -927,7 +927,7 @@ function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void 
               data-testid={`edit-translation-${layer.id}`}
               aria-label={t('layers.translationLabel', { name })}
               wrap='soft'
-              className='max-h-16 min-h-9 w-full max-w-full min-w-0 resize-y overflow-y-auto rounded-md border-primary/25 bg-background px-1.5 py-1 text-[12px] leading-4 md:text-[12px]'
+              className='max-h-52 min-h-9 w-full max-w-full min-w-0 resize-y overflow-y-auto rounded-md border-primary/25 bg-background px-1.5 py-1 text-[12px] leading-4 md:text-[12px]'
               value={layer.content.translation?.text ?? ''}
               onCommit={(text) =>
                 void call(commands.setTranslation, layer.id, text.trim() ? text : null)
@@ -964,7 +964,7 @@ function ReferenceField({ layer }: { layer: Extract<Layer, { type: 'text' }> }) 
       {reference ? (
         <p
           data-testid={`reference-${layer.id}`}
-          className='max-h-16 min-w-0 overflow-y-auto rounded-md bg-foreground/[0.045] px-1.5 py-1 text-[12px] leading-4 break-words whitespace-pre-wrap text-foreground/85'
+          className='max-h-52 min-w-0 overflow-y-auto rounded-md bg-foreground/[0.045] px-1.5 py-1 text-[12px] leading-4 break-words whitespace-pre-wrap text-foreground/85'
         >
           {reference.text}
         </p>
