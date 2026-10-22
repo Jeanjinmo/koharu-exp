@@ -15,6 +15,7 @@ import {
 } from '@/components/editor/References'
 import { pageKey, pagesKey, projectKey, queryClient } from '@/lib/queries'
 import { receiveJob, useKoharuStore } from '@/lib/store'
+import { dragOnto, place } from '@/tests/pointer'
 import {
   commands,
   type PageReferenceSummary,
@@ -193,7 +194,7 @@ describe('reference import', () => {
     await waitFor(() => expect(useKoharuStore.getState().referenceImport).toBe(false))
   })
 
-  it('puts a reference on any page in one step, from its menu or by dragging it', async () => {
+  it('puts a reference on any page in one step, by dragging it or from its menu', async () => {
     const user = userEvent.setup()
     install(['one', 'two', 'three', 'four', 'five'].map((id) => page(id)))
     stage('scan.png')
@@ -202,29 +203,23 @@ describe('reference import', () => {
 
     await user.click(screen.getByRole('button', { name: 'Choose files…' }))
     const first = await screen.findByRole('listitem', { name: '1. one' })
+    const fifth = screen.getByRole('listitem', { name: '5. five' })
     expect(within(first).getByText('scan.png')).toBeInTheDocument()
-    await user.click(within(first).getByRole('button', { name: 'Pair with page…' }))
-    await user.click(await screen.findByRole('menuitemradio', { name: '4. four' }))
-
-    const fourth = screen.getByRole('listitem', { name: '4. four' })
-    expect(within(fourth).getByText('scan.png')).toBeInTheDocument()
+    dragOnto(within(first).getByTitle('Drag onto a page to pair it there'), fifth)
+    expect(within(fifth).getByText('scan.png')).toBeInTheDocument()
     expect(within(first).getByText('No reference')).toBeInTheDocument()
 
-    const second = screen.getByRole('listitem', { name: '2. two' })
-    const source = within(fourth).getByTitle('Drag onto a page to pair it there')
-    fireEvent.dragStart(source)
-    fireEvent.dragOver(second)
-    expect(second).toHaveAttribute('data-drop', 'true')
-    fireEvent.drop(second)
-    fireEvent.dragEnd(source)
-    expect(within(second).getByText('scan.png')).toBeInTheDocument()
-    expect(within(fourth).getByText('No reference')).toBeInTheDocument()
+    await user.click(within(fifth).getByRole('button', { name: 'Pair with page…' }))
+    await user.click(await screen.findByRole('menuitemradio', { name: '4. four' }))
+    const fourth = screen.getByRole('listitem', { name: '4. four' })
+    expect(within(fourth).getByText('scan.png')).toBeInTheDocument()
+    expect(within(fifth).getByText('No reference')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Attach 1 reference' }))
-    expect(attach).toHaveBeenCalledWith([{ page: 'two', reference: 0 }], 'id-ID')
+    expect(attach).toHaveBeenCalledWith([{ page: 'four', reference: 0 }], 'id-ID')
   })
 
-  it('swaps references dragged between pages and unpairs one dropped on Not paired', async () => {
+  it('swaps references dragged between pages, unpairs on Not paired, and pairs from it', async () => {
     const user = userEvent.setup()
     install([page('one'), page('two', english), page('three')])
     stage('a.png', 'b.png', 'c.png', 'd.png')
@@ -234,28 +229,58 @@ describe('reference import', () => {
     const first = await screen.findByRole('listitem', { name: '1. one' })
     const second = screen.getByRole('listitem', { name: '2. two' })
     const third = screen.getByRole('listitem', { name: '3. three' })
+    const source = (row: HTMLElement) => within(row).getByTitle('Drag onto a page to pair it there')
     expect(within(second).getByText('Replaces the current reference')).toBeInTheDocument()
 
-    const dragged = within(first).getByTitle('Drag onto a page to pair it there')
-    fireEvent.dragStart(dragged)
-    fireEvent.dragOver(third)
-    fireEvent.drop(third)
-    fireEvent.dragEnd(dragged)
+    // A press that does not move is no drag.
+    fireEvent.pointerDown(source(first), { pointerId: 1, button: 0, clientX: 40, clientY: 30 })
+    fireEvent.pointerUp(source(first), { pointerId: 1, button: 0, clientX: 41, clientY: 31 })
+    fireEvent.click(source(first))
+    expect(within(first).getByText('a.png')).toBeInTheDocument()
+
+    dragOnto(source(first), third)
     expect(within(first).getByText('c.png')).toBeInTheDocument()
     expect(within(third).getByText('a.png')).toBeInTheDocument()
 
     const notPaired = screen.getByRole('group', { name: 'Not paired:' })
     expect(within(notPaired).getByText('d.png')).toBeInTheDocument()
-    const back = within(second).getByTitle('Drag onto a page to pair it there')
-    fireEvent.dragStart(back)
-    fireEvent.dragOver(notPaired)
-    fireEvent.drop(notPaired)
-    fireEvent.dragEnd(back)
+    dragOnto(source(second), notPaired)
     expect(within(second).getByText('No reference')).toBeInTheDocument()
     expect(within(notPaired).getByText('b.png')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent(
       '2 of 3 pages get a reference · 2 references are not paired',
     )
+
+    dragOnto(within(notPaired).getByText('d.png'), second)
+    expect(within(second).getByText('d.png')).toBeInTheDocument()
+    expect(within(notPaired).queryByText('d.png')).not.toBeInTheDocument()
+  })
+
+  it('offers Not paired as a place to drop while every reference is paired', async () => {
+    const user = userEvent.setup()
+    install([page('one'), page('two')])
+    stage('a.png', 'b.png')
+    openDialog()
+
+    await user.click(screen.getByRole('button', { name: 'Choose files…' }))
+    const first = await screen.findByRole('listitem', { name: '1. one' })
+    expect(screen.queryByRole('group', { name: 'Not paired:' })).not.toBeInTheDocument()
+    const source = within(first).getByTitle('Drag onto a page to pair it there')
+
+    fireEvent.pointerDown(source, { pointerId: 1, button: 0, clientX: 40, clientY: 30 })
+    fireEvent.pointerMove(source, { pointerId: 1, clientX: 40, clientY: 90 })
+    const notPaired = screen.getByRole('group', { name: 'Not paired:' })
+    place(notPaired, { x: 0, y: 300, width: 400, height: 36 })
+    vi.spyOn(document, 'elementFromPoint').mockReturnValue(notPaired)
+    fireEvent.pointerMove(source, { pointerId: 1, clientX: 40, clientY: 310 })
+    expect(notPaired).toHaveAttribute('data-over', 'true')
+    fireEvent.pointerUp(source, { pointerId: 1, button: 0, clientX: 40, clientY: 310 })
+    fireEvent.click(source)
+
+    expect(within(first).getByText('No reference')).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('group', { name: 'Not paired:' })).getByText('a.png'),
+    ).toBeVisible()
   })
 
   it('unpairs one page in place and shifts only when asked, telling how many moved', async () => {

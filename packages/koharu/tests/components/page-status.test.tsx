@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { PageRail } from '@/components/editor/PageRail'
 import { pageKey, pagesKey, projectKey, queryClient } from '@/lib/queries'
 import { useKoharuStore } from '@/lib/store'
+import { dragOnto, place } from '@/tests/pointer'
 import { commands, type PageStatus, type PageSummary } from '@koharu/bridge/protocol'
 
 // Clicking a page shows it on the canvas, which finishes a frame later.
@@ -138,5 +139,88 @@ describe('page status', () => {
     })
     expect(useKoharuStore.getState().selectedPages).toEqual(['page-1', 'page-3'])
     expect(selectPage).not.toHaveBeenCalled()
+  })
+})
+
+describe('reordering pages', () => {
+  const pages = [1, 2, 3, 4, 5].map((number) =>
+    page(`page-${number}`, `Page ${number}`, 'not_started'),
+  )
+
+  function renderRail() {
+    install(pages)
+    vi.spyOn(commands, 'getPages').mockResolvedValue(pages)
+    vi.spyOn(commands, 'getProject').mockResolvedValue(null)
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PageRail />
+      </QueryClientProvider>,
+    )
+  }
+
+  const card = (label: string) => screen.getByText(label).closest('article')!
+
+  it('moves a page dropped below or above another in one step each', async () => {
+    const move = vi.spyOn(commands, 'movePage').mockResolvedValue(null)
+    renderRail()
+
+    dragOnto(card('Page 3'), card('Page 4'), { after: true })
+    expect(move).toHaveBeenCalledExactlyOnceWith('page-3', 3)
+    // The release that ends a drag is no click on the page.
+    expect(useKoharuStore.getState().selectedPages).toEqual([])
+
+    move.mockClear()
+    dragOnto(card('Page 3'), card('Page 2'))
+    expect(move).toHaveBeenCalledExactlyOnceWith('page-3', 1)
+
+    // Just above the page below, or just below the one above, is where it is.
+    move.mockClear()
+    dragOnto(card('Page 3'), card('Page 4'))
+    dragOnto(card('Page 3'), card('Page 2'), { after: true })
+    expect(move).not.toHaveBeenCalled()
+    await waitFor(() => expect(commands.getPages).toHaveBeenCalled())
+  })
+
+  it('shows where the page would go, and a press that does not move still selects', () => {
+    const move = vi.spyOn(commands, 'movePage').mockResolvedValue(null)
+    renderRail()
+    const third = card('Page 3')
+    const fifth = card('Page 5')
+    place(fifth, { x: 0, y: 200, width: 240, height: 72 })
+    vi.spyOn(document, 'elementFromPoint').mockReturnValue(fifth)
+
+    fireEvent.pointerDown(third, { pointerId: 1, button: 0, clientX: 40, clientY: 30 })
+    fireEvent.pointerMove(third, { pointerId: 1, clientX: 42, clientY: 32 })
+    expect(screen.queryByTestId('page-drop-line')).not.toBeInTheDocument()
+    fireEvent.pointerMove(third, { pointerId: 1, clientX: 40, clientY: 250 })
+    expect(fifth).toContainElement(screen.getByTestId('page-drop-line'))
+    expect(third).toHaveClass('opacity-50')
+    fireEvent.pointerCancel(third, { pointerId: 1 })
+    expect(screen.queryByTestId('page-drop-line')).not.toBeInTheDocument()
+
+    fireEvent.pointerDown(third, { pointerId: 2, button: 0, clientX: 40, clientY: 30 })
+    fireEvent.pointerMove(third, { pointerId: 2, clientX: 42, clientY: 31 })
+    fireEvent.pointerUp(third, { pointerId: 2, button: 0, clientX: 42, clientY: 31 })
+    fireEvent.click(third, { clientX: 42, clientY: 31 })
+    fireEvent.pointerDown(fifth, { pointerId: 3, button: 0, clientX: 40, clientY: 230 })
+    fireEvent.pointerUp(fifth, { pointerId: 3, button: 0, clientX: 40, clientY: 230 })
+    fireEvent.click(fifth, { ctrlKey: true, clientX: 40, clientY: 230 })
+    expect(useKoharuStore.getState().selectedPages).toEqual(['page-3', 'page-5'])
+    expect(move).not.toHaveBeenCalled()
+  })
+
+  it('scrolls the list while a page is held near its bottom edge', async () => {
+    renderRail()
+    const viewport = document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!
+    place(viewport, { x: 0, y: 0, width: 240, height: 600 })
+    const third = card('Page 3')
+
+    fireEvent.pointerDown(third, { pointerId: 1, button: 0, clientX: 40, clientY: 200 })
+    fireEvent.pointerMove(third, { pointerId: 1, clientX: 40, clientY: 590 })
+    await waitFor(() => expect(viewport.scrollTop).toBeGreaterThan(0))
+    fireEvent.pointerUp(third, { pointerId: 1, button: 0, clientX: 40, clientY: 590 })
+    const stopped = viewport.scrollTop
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(viewport.scrollTop).toBe(stopped)
   })
 })

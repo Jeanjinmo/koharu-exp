@@ -59,6 +59,8 @@ Element.prototype.setPointerCapture = vi.fn()
 Element.prototype.hasPointerCapture = vi.fn(() => true)
 Element.prototype.releasePointerCapture = vi.fn()
 Element.prototype.getAnimations = vi.fn(() => [])
+// jsdom lays nothing out, so no element is under any point unless a test says so.
+document.elementFromPoint = () => null
 Object.defineProperty(URL, 'createObjectURL', {
   value: vi.fn(() => 'blob:koharu-thumbnail'),
   writable: true,

@@ -10,10 +10,11 @@ import {
   ImagePlus,
   LoaderCircle,
 } from 'lucide-react'
-import { useEffect, useId, useMemo, useState } from 'react'
+import { type ComponentProps, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PageThumbnail } from '@/components/editor/PageRail'
+import { DragGhost, type DropTargetProps, usePointerDrag } from '@/components/editor/usePointerDrag'
 import { call } from '@/lib/backend'
 import { pagesKey, projectKey, refresh, usePages } from '@/lib/queries'
 import { useKoharuStore } from '@/lib/store'
@@ -68,6 +69,9 @@ const targetLanguageOf = (state: { preferences: Preferences | null }) =>
 
 /** How many characters at the end of a long name stay in view. */
 const NAME_TAIL = 12
+
+/** The drop target that takes a reference off its page. */
+const NOT_PAIRED = 'not-paired'
 
 interface Staged {
   /** Tells thumbnails of one staging apart from those of the one before. */
@@ -218,9 +222,20 @@ export function ReferenceImportDialog() {
   const [pairs, setPairs] = useState<Pairs>(noPairs)
   // The last shift, so its notice can take it back.
   const [shift, setShift] = useState<{ shifted: number; before: Pairs } | null>(null)
-  const [dragged, setDragged] = useState<number | null>(null)
-  const [target, setTarget] = useState<string | null>(null)
   const notPairedLabel = useId()
+  const list = useRef<HTMLOListElement>(null)
+  const referenceDrag = usePointerDrag<number>({
+    scroller: list,
+    onDrop: (reference, target) => {
+      if (target.id !== NOT_PAIRED) {
+        arrange(moveReference(pairs, reference, target.id))
+        return
+      }
+      const from = [...pairs].find(([, paired]) => paired === reference)?.[0]
+      if (from !== undefined) unpair(from)
+    },
+  })
+  const dragging = referenceDrag.dragging
 
   const rows = pages.map((page) => ({ page, reference: pairs.get(page.id) ?? null }))
   const chosen = rows.flatMap(({ page, reference }) =>
@@ -247,23 +262,6 @@ export function ReferenceImportDialog() {
     const result = shiftReferences(pages, pairs, page, direction, staged?.candidates.length ?? 0)
     setPairs(result.pairs)
     setShift(result.shifted > 0 ? { shifted: result.shifted, before: pairs } : null)
-  }
-
-  const drag = (reference: number | null) => {
-    setDragged(reference)
-    if (reference === null) setTarget(null)
-  }
-
-  const drop = (page: string | null) => {
-    if (dragged !== null) {
-      if (page !== null) {
-        arrange(moveReference(pairs, dragged, page))
-      } else {
-        const from = [...pairs].find(([, reference]) => reference === dragged)?.[0]
-        if (from !== undefined) unpair(from)
-      }
-    }
-    drag(null)
   }
 
   const reset = () => {
@@ -373,7 +371,7 @@ export function ReferenceImportDialog() {
                 </p>
               )}
             </div>
-            <ol className='min-h-0 overflow-y-auto rounded-lg border border-border/70'>
+            <ol ref={list} className='min-h-0 overflow-y-auto rounded-lg border border-border/70'>
               {rows.map(({ page, reference }, index) => (
                 <PairRow
                   key={page.id}
@@ -383,32 +381,27 @@ export function ReferenceImportDialog() {
                   staged={staged}
                   pages={pages}
                   disabled={busy}
-                  dragging={dragged !== null}
-                  dropping={dragged !== null && target === page.id}
-                  onDrag={drag}
-                  onTarget={setTarget}
-                  onDrop={() => drop(page.id)}
+                  dragged={reference !== null && dragging?.item === reference}
+                  over={dragging?.target?.id === page.id}
+                  source={reference === null || busy ? {} : referenceDrag.source(reference)}
+                  target={referenceDrag.target(page.id)}
                   onPair={(moved, to) => arrange(moveReference(pairs, moved, to))}
                   onUnpair={() => unpair(page.id)}
                   onShift={(direction) => shiftFrom(page.id, direction)}
                 />
               ))}
             </ol>
-            {unpaired.length > 0 && (
+            {/* Shown while dragging even when empty, so a reference can be dropped off. */}
+            {(unpaired.length > 0 || dragging) && (
               <div
+                {...referenceDrag.target(NOT_PAIRED)}
                 role='group'
                 aria-labelledby={notPairedLabel}
+                data-over={dragging?.target?.id === NOT_PAIRED}
                 className={cn(
-                  'flex flex-wrap items-center gap-1.5 rounded-lg text-[11px]',
-                  dragged !== null && 'outline-1 outline-offset-2 outline-border outline-dashed',
+                  'flex min-h-9 flex-wrap items-center gap-1.5 rounded-lg text-[11px] data-[over=true]:bg-primary/[0.09]',
+                  dragging && 'outline-1 outline-offset-2 outline-border outline-dashed',
                 )}
-                onDragOver={(event) => {
-                  if (dragged !== null) event.preventDefault()
-                }}
-                onDrop={(event) => {
-                  event.preventDefault()
-                  drop(null)
-                }}
               >
                 <span id={notPairedLabel} className='text-muted-foreground'>
                   {t('references.notPairedList')}
@@ -416,11 +409,12 @@ export function ReferenceImportDialog() {
                 {unpaired.map((reference) => (
                   <span
                     key={reference}
-                    draggable={!busy}
+                    {...(busy ? {} : referenceDrag.source(reference))}
                     title={t('references.dragHint')}
-                    className='flex max-w-64 cursor-grab items-center gap-1 rounded-md border border-border/70 py-0.5 pr-0.5 pl-1 active:cursor-grabbing'
-                    onDragStart={() => drag(reference)}
-                    onDragEnd={() => drag(null)}
+                    className={cn(
+                      'flex max-w-64 cursor-grab items-center gap-1 rounded-md border border-border/70 py-0.5 pr-0.5 pl-1 select-none active:cursor-grabbing',
+                      dragging?.item === reference && 'opacity-50',
+                    )}
                   >
                     <span className='grid h-8 w-6 shrink-0 place-items-center overflow-hidden rounded-sm bg-[var(--surface-well)]'>
                       <StagedThumbnail
@@ -439,6 +433,20 @@ export function ReferenceImportDialog() {
                   </span>
                 ))}
               </div>
+            )}
+            {dragging && (
+              <DragGhost x={dragging.x} y={dragging.y}>
+                <span className='flex max-w-64 items-center gap-1.5 rounded-md border border-border bg-popover p-1 pr-2 text-[11px] shadow-md'>
+                  <span className='grid h-8 w-6 shrink-0 place-items-center overflow-hidden rounded-sm bg-[var(--surface-well)]'>
+                    <StagedThumbnail
+                      staged={staged}
+                      reference={dragging.item}
+                      label={staged.candidates[dragging.item].name}
+                    />
+                  </span>
+                  <FileName name={staged.candidates[dragging.item].name} />
+                </span>
+              </DragGhost>
             )}
           </section>
         ) : (
@@ -654,11 +662,10 @@ function PairRow({
   staged,
   pages,
   disabled,
-  dragging,
-  dropping,
-  onDrag,
-  onTarget,
-  onDrop,
+  dragged,
+  over,
+  source,
+  target,
   onPair,
   onUnpair,
   onShift,
@@ -669,11 +676,14 @@ function PairRow({
   staged: Staged
   pages: readonly PageSummary[]
   disabled: boolean
-  dragging: boolean
-  dropping: boolean
-  onDrag: (reference: number | null) => void
-  onTarget: (page: string | null) => void
-  onDrop: () => void
+  /** Whether this row's reference is being dragged. */
+  dragged: boolean
+  /** Whether a dragged reference would be dropped on this row. */
+  over: boolean
+  /** Makes the row's reference draggable. */
+  source: ComponentProps<'div'>
+  /** Makes the row a place to drop a reference on. */
+  target: DropTargetProps
   onPair: (reference: number, page: string) => void
   onUnpair: () => void
   onShift: (direction: ShiftDirection) => void
@@ -683,21 +693,10 @@ function PairRow({
   const label = t('references.pageLabel', { number, label: page.label })
   return (
     <li
+      {...target}
       aria-label={label}
-      data-drop={dropping}
-      className='grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/60 px-2 py-1.5 last:border-b-0 data-[drop=true]:bg-primary/[0.09]'
-      onDragOver={(event) => {
-        if (!dragging) return
-        event.preventDefault()
-        onTarget(page.id)
-      }}
-      onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onTarget(null)
-      }}
-      onDrop={(event) => {
-        event.preventDefault()
-        onDrop()
-      }}
+      data-over={over}
+      className='grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/60 px-2 py-1.5 last:border-b-0 data-[over=true]:bg-primary/[0.09]'
     >
       <div className='flex min-w-0 items-center gap-2'>
         <div className='grid h-12 w-9 shrink-0 place-items-center overflow-hidden rounded bg-[var(--surface-well)]'>
@@ -710,11 +709,12 @@ function PairRow({
       <ArrowRight className='size-3.5 text-muted-foreground' />
       {candidate && reference !== null ? (
         <div
-          draggable={!disabled}
+          {...source}
           title={t('references.dragHint')}
-          className='flex min-w-0 cursor-grab items-center gap-2 active:cursor-grabbing'
-          onDragStart={() => onDrag(reference)}
-          onDragEnd={() => onDrag(null)}
+          className={cn(
+            'flex min-w-0 cursor-grab items-center gap-2 select-none active:cursor-grabbing',
+            dragged && 'opacity-50',
+          )}
         >
           <div className='grid h-12 w-9 shrink-0 place-items-center overflow-hidden rounded bg-[var(--surface-well)]'>
             <StagedThumbnail staged={staged} reference={reference} label={candidate.name} />

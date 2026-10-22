@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual'
+import { defaultRangeExtractor, observeElementRect, useVirtualizer } from '@tanstack/react-virtual'
 import {
   BookImage,
   FilePlus2,
@@ -15,10 +15,18 @@ import {
   Settings,
   Trash2,
 } from 'lucide-react'
-import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type ComponentProps,
+  type MouseEvent as ReactMouseEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ResourceMonitor } from '@/components/editor/ResourceMonitor'
+import { DragGhost, type DropTarget, usePointerDrag } from '@/components/editor/usePointerDrag'
 import { call } from '@/lib/backend'
 import {
   pageKey,
@@ -81,6 +89,19 @@ interface IntentPrefetchState {
   pages: Set<string>
 }
 
+/**
+ * Where a page dropped beside another lands, as an index into the pages
+ * without it, which is what `movePage` takes; `null` when it stays put.
+ */
+function dropIndex(pages: readonly PageSummary[], page: string, target: DropTarget) {
+  const from = pages.findIndex((each) => each.id === page)
+  const beside = pages.findIndex((each) => each.id === target.id)
+  if (from < 0 || beside < 0) return null
+  const slot = beside + (target.after ? 1 : 0)
+  const to = slot > from ? slot - 1 : slot
+  return to === from ? null : to
+}
+
 export function PageRail() {
   const { t } = useTranslation()
   const pages = usePages().data ?? emptyPages
@@ -96,7 +117,6 @@ export function PageRail() {
   const anchor = useRef<number | null>(null)
   const selectionRequest = useRef(0)
   const intentPrefetch = useRef<IntentPrefetchState | null>(null)
-  const [dragged, setDragged] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [renaming, setRenaming] = useState<PageSummary | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -109,6 +129,18 @@ export function PageRail() {
     [normalized, pages],
   )
   const pageList = useRef<HTMLDivElement>(null)
+  const pageDrag = usePointerDrag<string>({
+    scroller: pageList,
+    onDrop: (page, target) => {
+      const index = dropIndex(pages, page, target)
+      if (index === null) return
+      void call(commands.movePage, page, index)
+        .then(() => refresh(projectKey, pagesKey))
+        .catch(() => undefined)
+    },
+  })
+  const dragging = pageDrag.dragging
+  const draggedPage = dragging && pages.find((page) => page.id === dragging.item)
   const pageVirtualizer = useVirtualizer({
     count: visiblePages.length,
     getScrollElement: () => pageList.current,
@@ -116,6 +148,13 @@ export function PageRail() {
     estimateSize: () => 72,
     gap: 2,
     overscan: 6,
+    // The dragged card holds the pointer, so it stays rendered while the list
+    // scrolls it out of view.
+    rangeExtractor: (range) => {
+      const indexes = defaultRangeExtractor(range)
+      const held = visiblePages.findIndex(({ page }) => page.id === dragging?.item)
+      return held < 0 || indexes.includes(held) ? indexes : [...indexes, held].sort((a, b) => a - b)
+    },
     initialRect: { width: 240, height: 600 },
     observeElementRect: (instance, callback) =>
       observeElementRect(instance, (rect) =>
@@ -380,6 +419,15 @@ export function PageRail() {
                 const item = visiblePages[virtualRow.index]
                 if (!item) return null
                 const { page, index } = item
+                const target = dragging?.target
+                const drop =
+                  dragging &&
+                  target?.id === page.id &&
+                  dropIndex(pages, dragging.item, target) !== null
+                    ? target.after
+                      ? 'after'
+                      : 'before'
+                    : null
                 return (
                   <div
                     key={virtualRow.key}
@@ -391,31 +439,39 @@ export function PageRail() {
                       page={page}
                       active={active === page.id}
                       selected={selected.includes(page.id)}
-                      dragged={dragged === page.id}
+                      dragged={dragging?.item === page.id}
+                      drop={drop}
+                      drag={{ ...pageDrag.source(page.id), ...pageDrag.target(page.id) }}
                       onIntent={active === page.id ? undefined : () => prefetchOnIntent(page.id)}
                       onSelect={(additive, range) => select(index, additive, range)}
-                      onDragStart={() => setDragged(page.id)}
-                      onDragEnd={() => setDragged(null)}
                       onRename={() => openRename(page)}
                       onStatus={(status) => setStatus(page.id, status)}
                       onAddReference={() => setReferenceFile(page.id)}
                       onReadReference={() => readReference(page.id)}
                       onRemoveReference={() => removeReference(page.id)}
                       onDelete={() => deletePage(page.id)}
-                      onDrop={() => {
-                        if (dragged && dragged !== page.id) {
-                          void call(commands.movePage, dragged, index)
-                            .then(() => refresh(projectKey, pagesKey))
-                            .catch(() => undefined)
-                        }
-                        setDragged(null)
-                      }}
                     />
                   </div>
                 )
               })}
             </div>
           </ScrollArea>
+        )}
+        {dragging && draggedPage && (
+          <DragGhost x={dragging.x} y={dragging.y}>
+            <span className='flex items-center gap-2 rounded-lg border border-border bg-popover p-1 pr-2.5 text-[10px] font-medium shadow-md'>
+              <span className='grid h-8 w-6 place-items-center overflow-hidden rounded-sm bg-[var(--surface-well)]'>
+                {draggedPage.source_asset && (
+                  <PageThumbnail
+                    page={draggedPage.id}
+                    asset={draggedPage.source_asset}
+                    label={draggedPage.label}
+                  />
+                )}
+              </span>
+              <span className='max-w-40 truncate'>{draggedPage.label}</span>
+            </span>
+          </DragGhost>
         )}
 
         <div className='mt-auto flex shrink-0 items-center gap-2 px-2 py-2'>
@@ -549,43 +605,43 @@ function PageItem({
   active,
   selected,
   dragged,
+  drop,
+  drag,
   onIntent,
   onSelect,
-  onDragStart,
-  onDragEnd,
   onRename,
   onStatus,
   onAddReference,
   onReadReference,
   onRemoveReference,
   onDelete,
-  onDrop,
 }: {
   page: PageSummary
   active: boolean
   selected: boolean
   dragged: boolean
+  /** Which side of this card a dragged page would go to. */
+  drop: 'before' | 'after' | null
+  /** Makes the card draggable and a place to drop other pages beside. */
+  drag: ComponentProps<'article'>
   onIntent?: () => void
   onSelect: (additive: boolean, range: boolean) => void
-  onDragStart: () => void
-  onDragEnd: () => void
   onRename: () => void
   onStatus: (status: PageStatus) => void
   onAddReference: () => void
   onReadReference: () => void
   onRemoveReference: () => void
   onDelete: () => void
-  onDrop: () => void
 }) {
   const { t } = useTranslation()
 
   return (
     <article
-      draggable
+      {...drag}
       data-active={active}
       data-selected={selected}
       className={cn(
-        'group grid cursor-default grid-cols-[48px_minmax(0,1fr)] gap-2.5 rounded-xl p-1.5 transition-colors select-none',
+        'group relative grid cursor-grab grid-cols-[48px_minmax(0,1fr)] gap-2.5 rounded-xl p-1.5 transition-colors select-none active:cursor-grabbing',
         active
           ? 'bg-primary/[0.09] hover:bg-primary/[0.09]'
           : selected
@@ -602,14 +658,16 @@ function PageItem({
       onDoubleClick={(event) => {
         if (fromRow(event)) onRename()
       }}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => {
-        event.preventDefault()
-        onDrop()
-      }}
     >
+      {drop && (
+        <span
+          data-testid='page-drop-line'
+          className={cn(
+            'pointer-events-none absolute inset-x-1.5 h-0.5 rounded-full bg-primary',
+            drop === 'before' ? '-top-0.5' : '-bottom-0.5',
+          )}
+        />
+      )}
       <div className='grid h-16 w-12 place-items-center overflow-hidden rounded-lg bg-[var(--surface-well)]'>
         {page.source_asset ? (
           <PageThumbnail page={page.id} asset={page.source_asset} label={page.label} />
