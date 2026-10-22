@@ -11,6 +11,8 @@ use serde::Serialize;
 use specta::Type;
 use tokio::sync::broadcast;
 
+use crate::Reach;
+
 const CAPACITY: usize = 100;
 /// Errors are shortened to this many characters of their first line.
 const ERROR_LENGTH: usize = 200;
@@ -22,8 +24,12 @@ pub struct ToolActivity {
     #[specta(type = f64)]
     pub finished_at: u64,
     pub tool: String,
-    /// The page the call worked on, when the host reports one.
+    /// The page the call worked on, or the first of several, when the host
+    /// reports one. Following the agent shows it.
     pub page: Option<String>,
+    /// How far the call reached when it worked on several pages, which the
+    /// log names instead of `page`.
+    pub reach: Option<Reach>,
     pub ok: bool,
     /// Whether the call changed the project.
     pub changed: bool,
@@ -43,6 +49,7 @@ impl ToolActivity {
                 }),
             tool,
             page: None,
+            reach: None,
             ok: true,
             changed: false,
             error: None,

@@ -166,7 +166,7 @@ describe('MCP tools settings', () => {
     )
   })
 
-  it('lists recent tool calls with their pages and clears them', async () => {
+  it('lists recent tool calls with the pages they reached and clears them', async () => {
     queryClient.setQueryData(projectKey, {
       name: 'Book',
       revision: 1,
@@ -201,6 +201,7 @@ describe('MCP tools settings', () => {
           finished_at: Date.UTC(2026, 9, 20, 8, 0, 0),
           tool: 'set_translations',
           page: 'page-2',
+          reach: null,
           ok: true,
           changed: true,
           error: null,
@@ -210,10 +211,42 @@ describe('MCP tools settings', () => {
           finished_at: Date.UTC(2026, 9, 20, 8, 0, 5),
           tool: 'view_page',
           page: null,
+          reach: null,
           ok: false,
           changed: false,
           error: 'Tool `view_page` is disabled in Koharu settings',
           elapsed_ms: 0,
+        },
+        // The first page of a run on several pages is not its label.
+        {
+          finished_at: Date.UTC(2026, 9, 20, 8, 1, 0),
+          tool: 'run_pipeline',
+          page: 'page-1',
+          reach: { kind: 'project', pages: 2 },
+          ok: true,
+          changed: true,
+          error: null,
+          elapsed_ms: 60000,
+        },
+        {
+          finished_at: Date.UTC(2026, 9, 20, 8, 2, 0),
+          tool: 'run_pipeline',
+          page: 'page-1',
+          reach: { kind: 'pages', pages: 2 },
+          ok: true,
+          changed: true,
+          error: null,
+          elapsed_ms: 30000,
+        },
+        {
+          finished_at: Date.UTC(2026, 9, 20, 8, 3, 0),
+          tool: 'run_pipeline',
+          page: 'page-2',
+          reach: null,
+          ok: true,
+          changed: true,
+          error: null,
+          elapsed_ms: 15000,
         },
       ],
     })
@@ -223,11 +256,16 @@ describe('MCP tools settings', () => {
 
     const log = await screen.findByRole('list', { name: 'Activity' })
     const rows = log.querySelectorAll('li')
-    expect(rows[0]).toHaveTextContent('view_page')
-    expect(rows[0]).toHaveTextContent('Tool `view_page` is disabled in Koharu settings')
-    expect(rows[1]).toHaveTextContent('set_translations')
-    expect(rows[1]).toHaveTextContent('Page 2 · 002.png')
-    expect(rows[1]).toHaveTextContent('1.3 s')
+    // Newest first: one page, several pages, and the whole project.
+    expect(rows[0]).toHaveTextContent('run_pipelinePage 2 · 002.png15.0 s')
+    expect(rows[1]).toHaveTextContent('run_pipeline2 pages30.0 s')
+    expect(rows[2]).toHaveTextContent('run_pipelineAll pages (2)60.0 s')
+    expect(rows[2]).not.toHaveTextContent('001.png')
+    expect(rows[3]).toHaveTextContent('view_page')
+    expect(rows[3]).toHaveTextContent('Tool `view_page` is disabled in Koharu settings')
+    expect(rows[4]).toHaveTextContent('set_translations')
+    expect(rows[4]).toHaveTextContent('Page 2 · 002.png')
+    expect(rows[4]).toHaveTextContent('1.3 s')
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
     await waitFor(() => expect(clear).toHaveBeenCalled())

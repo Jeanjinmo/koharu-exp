@@ -525,6 +525,7 @@
       "aboutTool": "About {{tool}}",
       "activity": "Activity",
       "activityDescription": "The last 100 tool calls from MCP clients since Koharu started. Arguments and the token are never recorded.",
+      "allPages": "All pages ({{count}})",
       "chooseFolder": "Choose…",
       "clearActivity": "Clear",
       "defaultFolder": "Use the default folder",
@@ -557,6 +558,8 @@
       },
       "noActivity": "No tool calls yet.",
       "page": "Page {{number}} · {{label}}",
+      "pageCount_one": "{{count}} page",
+      "pageCount_other": "{{count}} pages",
       "profile": "Profile",
       "profileDescription": "Koharu cannot tell what your agent's model can do, so choose the profile that matches it. Changing a checkbox switches to Custom.",
       "profileHints": {

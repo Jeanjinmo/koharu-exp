@@ -620,6 +620,13 @@ export type Quantization = {
 
 export type RasterLayerKind = "cleanup" | "paint";
 
+/**  How far a call that worked on several pages reached, for activity logs. */
+export type Reach = 
+/**  Every page of the project. */
+{ kind: "project"; pages: number } | 
+/**  Some of the project's pages. */
+{ kind: "pages"; pages: number };
+
 export type Reasoning = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export type ReferenceCandidate = {
@@ -719,8 +726,16 @@ export type ToolActivity = {
 	/**  When the call finished, in milliseconds since the Unix epoch. */
 	finished_at: number,
 	tool: string,
-	/**  The page the call worked on, when the host reports one. */
+	/**
+	 *  The page the call worked on, or the first of several, when the host
+	 *  reports one. Following the agent shows it.
+	 */
 	page: string | null,
+	/**
+	 *  How far the call reached when it worked on several pages, which the
+	 *  log names instead of `page`.
+	 */
+	reach: Reach | null,
 	ok: boolean,
 	/**  Whether the call changed the project. */
 	changed: boolean,

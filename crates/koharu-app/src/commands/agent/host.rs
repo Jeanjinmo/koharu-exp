@@ -8,7 +8,9 @@ use std::{
 use anyhow::{Context as _, Result, anyhow, bail};
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use koharu_agent::{Control, Host, Invocation, Tool, ToolCall, ToolGroup, ToolMetadata, Vision};
+use koharu_agent::{
+    Control, Host, Invocation, Reach, Tool, ToolCall, ToolGroup, ToolMetadata, Vision,
+};
 use koharu_desktop::{Desktop, Frame};
 use koharu_pipeline::{
     Bounds, Committer, InpaintingMask, MaskArea, Operation, PipelineConfig, Report, RunStatus,
@@ -208,7 +210,7 @@ impl KoharuHost {
 
     async fn run_pipeline(&self, arguments: RunPipeline, control: &Control) -> Result<Invocation> {
         let scope = arguments.scope()?;
-        let page = first_page(&self.snapshot().await?, &scope);
+        let reached = reached(&self.snapshot().await?, &scope);
         let region_page = match scope {
             Scope::Region { page, .. } => Some(page),
             _ => None,
@@ -246,7 +248,12 @@ impl KoharuHost {
                     .collect::<Vec<_>>()
             );
         }
-        Ok(on_page(Invocation::changed(result)?, page))
+        let invocation = Invocation::changed(result)?;
+        Ok(match reached {
+            Some((first, Some(reach))) => invocation.on_pages(first, reach),
+            Some((page, None)) => invocation.on_page(page),
+            None => invocation,
+        })
     }
 
     /// Inpaints only the given area of a page into its cleanup layer. Text
@@ -1164,19 +1171,30 @@ fn on_page(invocation: Invocation, page: Option<EntityId>) -> Invocation {
     }
 }
 
-/// The first page, in project order, that a pipeline run works on.
-fn first_page(snapshot: &Snapshot, scope: &Scope) -> Option<EntityId> {
-    match scope {
-        Scope::Project => snapshot.pages().next().map(|page| page.id()),
-        Scope::Pages(pages) => snapshot
-            .pages()
-            .map(|page| page.id())
-            .find(|page| pages.contains(page)),
-        Scope::Region { page, .. } => Some(*page),
-        Scope::Entities(entities) => entities
-            .iter()
-            .find_map(|entity| Project::containing_page(snapshot, *entity).ok()),
-    }
+/// The page a pipeline run works on, or the first of several in project
+/// order with how far they reach. Following the agent shows that page, while
+/// the activity log names the reach.
+fn reached(snapshot: &Snapshot, scope: &Scope) -> Option<(EntityId, Option<Reach>)> {
+    let order = snapshot.pages().map(|page| page.id());
+    let pages = match scope {
+        Scope::Project => order.collect::<Vec<_>>(),
+        Scope::Pages(pages) => order.filter(|page| pages.contains(page)).collect(),
+        Scope::Region { page, .. } => vec![*page],
+        Scope::Entities(entities) => {
+            let holding = entities
+                .iter()
+                .filter_map(|entity| Project::containing_page(snapshot, *entity).ok())
+                .collect::<BTreeSet<_>>();
+            order.filter(|page| holding.contains(page)).collect()
+        }
+    };
+    let first = *pages.first()?;
+    let count = u32::try_from(pages.len()).unwrap_or(u32::MAX);
+    Some(match scope {
+        Scope::Project => (first, Some(Reach::Project { pages: count })),
+        _ if pages.len() > 1 => (first, Some(Reach::Pages { pages: count })),
+        _ => (first, None),
+    })
 }
 
 fn text_elements(snapshot: &Snapshot, page: EntityId) -> Result<BTreeSet<EntityId>> {
@@ -1653,7 +1671,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pipeline_runs_follow_their_first_page_in_project_order() {
+    async fn pipeline_runs_name_their_reach_and_follow_their_first_page() {
         let mut session = koharu_scene::Session::memory().await.unwrap();
         let mut pages = Vec::new();
         let patch = session
@@ -1670,13 +1688,20 @@ mod tests {
             .unwrap();
         let snapshot = session.commit(patch).await.unwrap().snapshot;
 
-        assert_eq!(first_page(&snapshot, &Scope::Project), Some(pages[0]));
         assert_eq!(
-            first_page(&snapshot, &Scope::Pages(vec![pages[2], pages[1]])),
-            Some(pages[1])
+            reached(&snapshot, &Scope::Project),
+            Some((pages[0], Some(Reach::Project { pages: 3 })))
         );
         assert_eq!(
-            first_page(
+            reached(&snapshot, &Scope::Pages(vec![pages[2], pages[1]])),
+            Some((pages[1], Some(Reach::Pages { pages: 2 })))
+        );
+        assert_eq!(
+            reached(&snapshot, &Scope::Pages(vec![pages[2]])),
+            Some((pages[2], None))
+        );
+        assert_eq!(
+            reached(
                 &snapshot,
                 &Scope::Region {
                     page: pages[2],
@@ -1688,9 +1713,9 @@ mod tests {
                     },
                 },
             ),
-            Some(pages[2])
+            Some((pages[2], None))
         );
-        assert_eq!(first_page(&snapshot, &Scope::Entities(Vec::new())), None);
+        assert_eq!(reached(&snapshot, &Scope::Entities(Vec::new())), None);
     }
 
     #[test]

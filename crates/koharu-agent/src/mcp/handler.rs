@@ -13,7 +13,7 @@ use rmcp::{
 use serde_json::Value;
 
 use super::{Calls, Clients, Shared, ToolActivity};
-use crate::{Control, Host, Invocation, Tool, ToolCall, ToolGroup, ToolImage};
+use crate::{Control, Host, Invocation, Reach, Tool, ToolCall, ToolGroup, ToolImage};
 
 // Host-neutral counterpart of the in-app agent instructions. MCP clients receive no
 // injected project context, so they are told how to read the project themselves.
@@ -85,12 +85,13 @@ where
             arguments: Value::Object(request.arguments.unwrap_or_default()).to_string(),
         };
         let tool = call.name.clone();
-        let (result, page, changed) = self.run(call, &context).await?;
+        let (result, page, reach, changed) = self.run(call, &context).await?;
         let activity = ToolActivity::new(tool, started.elapsed());
         self.shared.activity.record(match result.is_error {
             Some(true) => activity.failed(first_text(&result)),
             _ => ToolActivity {
                 page,
+                reach,
                 changed,
                 ..activity
             },
@@ -121,24 +122,25 @@ where
     H: Host,
 {
     /// Runs one call unless Koharu's settings or a stopping server refuse it.
-    /// Also returns the page the call worked on and whether it changed the project.
+    /// Also returns the page the call worked on, how far it reached, and
+    /// whether it changed the project.
     async fn run(
         &self,
         call: ToolCall,
         context: &RequestContext<RoleServer>,
-    ) -> Result<(CallToolResult, Option<String>, bool), ErrorData> {
+    ) -> Result<(CallToolResult, Option<String>, Option<Reach>, bool), ErrorData> {
         let disabled = self
             .shared
             .disables(&call.name)
             .map_err(|error| ErrorData::internal_error(format!("{error:#}"), None))?;
         if disabled {
             let message = format!("Tool `{}` is disabled in Koharu settings", call.name);
-            return Ok((refusal(message), None, false));
+            return Ok((refusal(message), None, None, false));
         }
         let control = Control::default();
         let Some(_call) = self.calls.begin(control.clone()) else {
             let message = "Koharu's MCP server is stopping and accepts no new tool calls";
-            return Ok((refusal(message.to_owned()), None, false));
+            return Ok((refusal(message.to_owned()), None, None, false));
         };
         let mut invocation = self.shared.host.invoke(call, &control);
         // A cancelled MCP request stops the host through the same control as an
@@ -150,10 +152,15 @@ where
                 invocation.await
             }
         };
-        let (page, changed) = invocation.as_ref().map_or((None, false), |invocation| {
-            (invocation.page.clone(), invocation.changed)
-        });
-        Ok((result(invocation), page, changed))
+        let (page, reach, changed) = match &invocation {
+            Ok(invocation) => (
+                invocation.page.clone(),
+                invocation.reach,
+                invocation.changed,
+            ),
+            Err(_) => (None, None, false),
+        };
+        Ok((result(invocation), page, reach, changed))
     }
 }
 

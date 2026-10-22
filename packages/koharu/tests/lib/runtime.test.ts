@@ -198,6 +198,7 @@ describe('Tauri runtime', () => {
           finished_at: 1,
           tool: 'inspect_page',
           page: 'page',
+          reach: null,
           ok: true,
           changed: false,
           error: null,

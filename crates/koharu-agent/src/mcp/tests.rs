@@ -16,7 +16,7 @@ use tokio::sync::{Notify, watch};
 
 use super::{ActivityLog, Server, ServerStatus, Shared, Supervisor, Token, write_pointer};
 use crate::{
-    Config, Control, Host, Invocation, McpConfig, Tool, ToolCall, ToolGroup, ToolMetadata,
+    Config, Control, Host, Invocation, McpConfig, Reach, Tool, ToolCall, ToolGroup, ToolMetadata,
     ToolProfile, Vision,
 };
 
@@ -44,8 +44,8 @@ pub(super) const PIXEL: &str = "UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAwA0JaQA
 const INITIALIZE: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"koharu-test","version":"0"}}}"#;
 
 /// Stand-in for Koharu's desktop host. `run_pipeline` blocks until its
-/// control is cancelled, like the real pipeline tool, and `move_page` until
-/// it is released.
+/// control is cancelled, like the real pipeline tool, unless it is given a
+/// number of `pages`, and `move_page` until it is released.
 #[derive(Default)]
 pub(super) struct FakeHost {
     started: Arc<Notify>,
@@ -83,6 +83,13 @@ impl Host for FakeHost {
             )?)?
             .on_page("page")),
             "run_pipeline" => {
+                let arguments = serde_json::from_str::<Value>(&call.arguments)?;
+                if let Some(pages) = arguments.get("pages").and_then(Value::as_u64) {
+                    let reach = Reach::Project {
+                        pages: u32::try_from(pages)?,
+                    };
+                    return Ok(Invocation::changed(json!({}))?.on_pages("page", reach));
+                }
                 self.started.notify_one();
                 control.cancelled().await;
                 self.cancelled.notify_one();
@@ -448,6 +455,16 @@ async fn finished_calls_are_logged_without_their_arguments() -> Result<()> {
             ),
         )
         .await?;
+    client
+        .call_tool(
+            CallToolRequestParams::new("run_pipeline").with_arguments(
+                json!({ "pages": 3 })
+                    .as_object()
+                    .cloned()
+                    .context("object")?,
+            ),
+        )
+        .await?;
 
     let activity = supervisor.activity();
     assert_eq!(
@@ -457,13 +474,21 @@ async fn finished_calls_are_logged_without_their_arguments() -> Result<()> {
                 entry.tool.as_str(),
                 entry.ok,
                 entry.changed,
-                entry.page.as_deref()
+                entry.page.as_deref(),
+                entry.reach,
             ))
             .collect::<Vec<_>>(),
         [
-            ("inspect_project", true, false, None),
-            ("set_translation", false, false, None),
-            ("set_translation", true, true, Some("page")),
+            ("inspect_project", true, false, None, None),
+            ("set_translation", false, false, None, None),
+            ("set_translation", true, true, Some("page"), None),
+            (
+                "run_pipeline",
+                true,
+                true,
+                Some("page"),
+                Some(Reach::Project { pages: 3 })
+            ),
         ]
     );
     assert_eq!(

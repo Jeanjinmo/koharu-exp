@@ -253,8 +253,13 @@ function ActivityRow({ entry, pages }: { entry: ToolActivity; pages: PageSummary
   const { t } = useTranslation()
   const finished = new Date(entry.finished_at)
   const index = pages.findIndex((page) => page.id === entry.page)
-  const page =
-    index >= 0
+  // A call on several pages is named by how far it reached; its first page is
+  // only where following the agent goes.
+  const page = entry.reach
+    ? t(entry.reach.kind === 'project' ? 'settings.mcp.allPages' : 'settings.mcp.pageCount', {
+        count: entry.reach.pages,
+      })
+    : index >= 0
       ? t('settings.mcp.page', { number: index + 1, label: pages[index].label })
       : entry.page?.slice(0, 8)
   return (

@@ -84,14 +84,28 @@ pub struct ToolCall {
     pub arguments: String,
 }
 
+/// How far a call that worked on several pages reached, for activity logs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Reach {
+    /// Every page of the project.
+    Project { pages: u32 },
+    /// Some of the project's pages.
+    Pages { pages: u32 },
+}
+
 #[derive(Clone, Debug)]
 pub struct Invocation {
     pub value: Value,
     pub changed: bool,
     pub images: Vec<ToolImage>,
-    /// The page the call worked on, for activity logs and for following the
-    /// agent. It is not part of the result sent to the model.
+    /// The page the call worked on, or the first of several in project order,
+    /// which following the agent shows. It is not part of the result sent to
+    /// the model.
     pub page: Option<String>,
+    /// How far the call reached when it worked on several pages; activity
+    /// logs name that rather than `page`.
+    pub reach: Option<Reach>,
 }
 
 impl Invocation {
@@ -101,6 +115,7 @@ impl Invocation {
             changed: false,
             images: Vec::new(),
             page: None,
+            reach: None,
         })
     }
 
@@ -110,12 +125,22 @@ impl Invocation {
             changed: true,
             images: Vec::new(),
             page: None,
+            reach: None,
         })
     }
 
     #[must_use]
     pub fn on_page(mut self, page: impl ToString) -> Self {
         self.page = Some(page.to_string());
+        self
+    }
+
+    /// Marks a call that worked on several pages, `first` being the first of
+    /// them in project order.
+    #[must_use]
+    pub fn on_pages(mut self, first: impl ToString, reach: Reach) -> Self {
+        self.page = Some(first.to_string());
+        self.reach = Some(reach);
         self
     }
 
