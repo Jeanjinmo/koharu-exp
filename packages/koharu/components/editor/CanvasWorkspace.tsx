@@ -476,6 +476,12 @@ export function CanvasWorkspace() {
   const clientPhysicalPoint = (clientX: number, clientY: number) =>
     physicalPoint(clientX, clientY, surface.current!.getBoundingClientRect())
 
+  // Dialogs opened from inside the canvas render in portals elsewhere in the
+  // document, yet their events still bubble here through React. They are not
+  // the canvas's: capturing their pointer keeps the click from their buttons.
+  const outside = (event: { currentTarget: Element; target: EventTarget }) =>
+    !event.currentTarget.contains(event.target as Node)
+
   const framesFor = (layers: string[]): TransformFrame[] =>
     expandLayerSelection(page?.layers ?? [], layers).flatMap((id) => {
       const layer = page?.layers.find((candidate) => candidate.id === id)
@@ -620,6 +626,7 @@ export function CanvasWorkspace() {
           onContextMenu={(event) => event.preventDefault()}
           onPointerDown={(event) => {
             if (
+              outside(event) ||
               !page ||
               !canvas ||
               canvasState.status !== 'ready' ||
@@ -749,11 +756,12 @@ export function CanvasWorkspace() {
             event.preventDefault()
           }}
           onPointerMove={(event) => {
-            if (!page || marquee.move(event)) return
+            if (!page || outside(event) || marquee.move(event)) return
             const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent]
             moveGesture(event.pointerId, coalesced.length ? coalesced : [event.nativeEvent])
           }}
           onPointerUp={(event) => {
+            if (outside(event)) return
             const marqueed = marquee.end(event)
             if (marqueed === 'click' && page && tool === 'select') {
               const point = clientPagePoint(event.clientX, event.clientY)
@@ -778,7 +786,7 @@ export function CanvasWorkspace() {
             }
           }}
           onWheel={(event) => {
-            if (!page) return
+            if (!page || outside(event)) return
             event.preventDefault()
             if (event.altKey && isBrushTool(tool)) {
               if (event.deltaY !== 0) {

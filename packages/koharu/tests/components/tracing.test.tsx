@@ -102,6 +102,19 @@ beforeEach(() => {
   vi.spyOn(commands, 'getProject').mockResolvedValue(null)
 })
 
+/**
+ * Presses and releases `target` as a browser does: once an element captures
+ * the pointer, the release and the click that follows go to that element.
+ */
+function press(target: Element) {
+  const capture = vi.mocked(Element.prototype.setPointerCapture)
+  const before = capture.mock.contexts.length
+  fireEvent.pointerDown(target, { pointerId: 9, button: 0 })
+  const captured = (capture.mock.contexts.slice(before).at(-1) as Element | undefined) ?? target
+  fireEvent.pointerUp(captured, { pointerId: 9, button: 0 })
+  fireEvent.click(captured)
+}
+
 function renderEditor() {
   show('one')
   render(
@@ -306,6 +319,45 @@ describe('aligning safely', () => {
     expect(save).toHaveBeenCalledWith(['one'], { ...shifted, x: 0.2 })
     await waitFor(() => expect(useKoharuStore.getState().compare.open).toBe(true))
     expect(useKoharuStore.getState().tracing).toBeNull()
+  })
+
+  it('answers the save question with a real press on each of its buttons', async () => {
+    const user = userEvent.setup()
+    const save = vi.spyOn(commands, 'setReferencePlacement').mockResolvedValue(null)
+    renderEditor()
+    await user.click(screen.getByRole('button', { name: 'Compare mode' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Align reference…' }))
+    const drag = () => {
+      const overlay = screen.getByRole('application', { name: 'Reference alignment' })
+      fireEvent.pointerDown(overlay, { pointerId: 1, button: 0, clientX: 100, clientY: 100 })
+      fireEvent.pointerMove(overlay, { pointerId: 1, clientX: 120, clientY: 100 })
+      fireEvent.pointerUp(overlay, { pointerId: 1, clientX: 120, clientY: 100 })
+    }
+    const ask = () => {
+      press(screen.getByRole('button', { name: 'Close alignment' }))
+      return screen.findByRole('alertdialog', { name: 'Save this alignment?' })
+    }
+
+    drag()
+    const moved = useKoharuStore.getState().tracing!.placement!
+    press(within(await ask()).getByRole('button', { name: 'Keep aligning' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(useKoharuStore.getState().tracing).toMatchObject({ placement: moved, leaving: null })
+
+    press(within(await ask()).getByRole('button', { name: 'Discard' }))
+    expect(useKoharuStore.getState().tracing).toBeNull()
+    expect(save).not.toHaveBeenCalled()
+
+    act(() => useKoharuStore.getState().startTracing('one', shifted))
+    drag()
+    press(within(await ask()).getByRole('button', { name: 'Save' }))
+    expect(save).toHaveBeenCalledWith(['one'], moved)
+    await waitFor(() => expect(useKoharuStore.getState().tracing).toBeNull())
+
+    // The dialog renders in a portal, outside the canvas it was opened from.
+    expect(vi.mocked(Element.prototype.setPointerCapture).mock.contexts).not.toContain(
+      screen.getByLabelText('Koharu canvas'),
+    )
   })
 
   it('discards when told to, and leaves an unchanged alignment without asking', async () => {
