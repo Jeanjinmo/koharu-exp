@@ -302,6 +302,24 @@ describe('canvas interaction adapter', () => {
     })
   })
 
+  it('keeps the tools over the canvas they work on when Compare shows a page beside it', () => {
+    installProject()
+    renderWorkspace()
+    const tools = screen.getByRole('complementary', { name: 'Tools' })
+    const area = tools.parentElement!
+    expect(area).toContainElement(screen.getByLabelText('Koharu canvas'))
+
+    act(() => {
+      useKoharuStore.getState().setCompareMode('side_by_side')
+      useKoharuStore.getState().setCompareOpen(true)
+    })
+    const compared = screen.getByRole('region', { name: 'Original' })
+    // The tools are placed and kept within the canvas half alone.
+    expect(tools.parentElement).toBe(area)
+    expect(area).not.toContainElement(compared)
+    expect(area.parentElement).toContainElement(compared)
+  })
+
   it('zooms to a box drawn with Ctrl+drag and keeps Ctrl+click for the selection', () => {
     installProject()
     const commit = vi.spyOn(commands, 'commitTransform').mockResolvedValue(2)
