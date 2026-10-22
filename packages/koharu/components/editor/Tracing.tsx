@@ -1,13 +1,21 @@
 'use client'
 
 import { ChevronDown, ChevronUp, GripHorizontal, Minus, Plus, RotateCcw, X } from 'lucide-react'
-import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PlacedImage, placedRect, usePageImage } from '@/components/editor/Compare'
 import { useFloatingPanel } from '@/components/editor/useFloatingPanel'
 import { useMarqueeZoom } from '@/components/editor/useMarqueeZoom'
 import { call } from '@/lib/backend'
+import { clampCameraTranslation, wheelCamera } from '@/lib/camera'
 import { pagesKey, projectKey, refresh, usePages } from '@/lib/queries'
 import { TRACING_OPACITY, tracingBlends, useKoharuStore } from '@/lib/store'
 import { commands, type Page, type ReferencePlacement } from '@koharu/bridge/protocol'
@@ -53,10 +61,20 @@ async function savePlacement(pages: string[], placement: ReferencePlacement) {
 /**
  * Aligning a reference by hand: the reference, partly transparent, over the
  * page's original artwork. Dragging moves it, Alt+wheel resizes it around the
- * pointer, and the arrow keys nudge it. Other wheel input still moves the
- * camera, so the alignment can be checked up close.
+ * pointer, and the arrow keys nudge it. The view moves as it does on the
+ * canvas, so the alignment can be checked up close: the wheel scrolls and
+ * Ctrl+wheel zooms, Space+drag and a middle-button drag pan, and Ctrl+drag
+ * zooms to a box. The overlay moves the camera itself rather than leaving
+ * those events to the canvas underneath.
  */
-export function TracingOverlay({ page }: { page: Page }) {
+export function TracingOverlay({
+  page,
+  spaceHeld,
+}: {
+  page: Page
+  /** Whether Space is held down, which makes a drag pan the view. */
+  spaceHeld: RefObject<boolean>
+}) {
   const { t } = useTranslation()
   const tracing = useKoharuStore((state) => state.tracing)
   const camera = useKoharuStore((state) => state.camera)
@@ -76,6 +94,7 @@ export function TracingOverlay({ page }: { page: Page }) {
     placement: ReferencePlacement
     moved: boolean
   } | null>(null)
+  const pan = useRef<{ pointer: number; x: number; y: number; translation: [number, number] }>(null)
   // Alt+wheel steps closer together than this are one undo step.
   const lastWheel = useRef(Number.NEGATIVE_INFINITY)
   const surface = useRef<HTMLDivElement>(null)
@@ -145,10 +164,22 @@ export function TracingOverlay({ page }: { page: Page }) {
       className='absolute inset-0 isolate z-10 cursor-move touch-none outline-none'
       onKeyDown={nudge}
       onPointerDown={(event) => {
-        if (event.button !== 0) return
+        const panning = event.button === 1 || (event.button === 0 && spaceHeld.current)
+        if (!panning && event.button !== 0) return
         event.currentTarget.focus()
-        if (marquee.start(event)) return
+        if (!panning && marquee.start(event)) return
         event.currentTarget.setPointerCapture(event.pointerId)
+        if (panning) {
+          // Also keeps a middle-button press from starting the webview's autoscroll.
+          event.preventDefault()
+          pan.current = {
+            pointer: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+            translation: camera.translation,
+          }
+          return
+        }
         drag.current = {
           pointer: event.pointerId,
           x: event.clientX,
@@ -158,6 +189,24 @@ export function TracingOverlay({ page }: { page: Page }) {
         }
       }}
       onPointerMove={(event) => {
+        const view = pan.current
+        if (view?.pointer === event.pointerId) {
+          const bounds = event.currentTarget.getBoundingClientRect()
+          const translation = clampCameraTranslation(
+            [
+              view.translation[0] + (event.clientX - view.x) * dpr,
+              view.translation[1] + (event.clientY - view.y) * dpr,
+            ],
+            camera.zoom,
+            page.size.width,
+            page.size.height,
+            bounds.width * dpr,
+            bounds.height * dpr,
+            dpr,
+          )
+          useKoharuStore.setState({ camera: { zoom: camera.zoom, translation, fitted: false } })
+          return
+        }
         const start = drag.current
         if (marquee.move(event) || !start || start.pointer !== event.pointerId) return
         moveTracing(
@@ -173,6 +222,7 @@ export function TracingOverlay({ page }: { page: Page }) {
       onPointerUp={(event) => {
         if (marquee.end(event)) return
         drag.current = null
+        pan.current = null
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId)
         }
@@ -180,11 +230,22 @@ export function TracingOverlay({ page }: { page: Page }) {
       onPointerCancel={() => {
         marquee.cancel()
         drag.current = null
+        pan.current = null
       }}
       onWheel={(event) => {
-        if (!event.altKey) return
         event.stopPropagation()
         const bounds = event.currentTarget.getBoundingClientRect()
+        if (!event.altKey) {
+          const next = wheelCamera(
+            useKoharuStore.getState().camera,
+            event,
+            bounds,
+            page.size.width,
+            page.size.height,
+          )
+          useKoharuStore.setState({ camera: { ...next, fitted: false } })
+          return
+        }
         const x =
           ((event.clientX - bounds.x) * dpr - camera.translation[0]) / camera.zoom / page.size.width
         const y =

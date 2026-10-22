@@ -493,6 +493,45 @@ describe('aligning safely', () => {
     expect(useKoharuStore.getState().tracing).toMatchObject({ placement: shifted, changed: false })
   })
 
+  it('moves the view by wheel, Space+drag, and middle drag, and resizes the reference by Alt+wheel', async () => {
+    renderEditor()
+    act(() => useKoharuStore.getState().startTracing('one', shifted))
+    const surface = await screen.findByRole('application', { name: 'Reference alignment' })
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      value: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+    })
+    const camera = () => useKoharuStore.getState().camera
+
+    // Each step moves the view once, though the canvas underneath has its own wheel handler.
+    fireEvent.wheel(surface, { deltaY: 100, clientX: 400, clientY: 300 })
+    expect(camera()).toEqual({ zoom: 2, translation: [40, -40], fitted: false })
+    fireEvent.wheel(surface, { deltaY: 100, shiftKey: true, clientX: 400, clientY: 300 })
+    expect(camera().translation).toEqual([-60, -40])
+    fireEvent.wheel(surface, { deltaY: -100, ctrlKey: true, clientX: 400, clientY: 300 })
+    expect(camera().zoom).toBeCloseTo(2 * Math.exp(0.15))
+
+    const zoomed = camera()
+    fireEvent.wheel(surface, { deltaY: -100, altKey: true, clientX: 400, clientY: 300 })
+    expect(camera()).toEqual(zoomed)
+    expect(useKoharuStore.getState().tracing!.placement!.width).toBeCloseTo(0.8 * Math.exp(0.05))
+
+    // Neither pan moves the reference.
+    const placed = useKoharuStore.getState().tracing!.placement
+    fireEvent.keyDown(surface, { key: ' ', code: 'Space' })
+    fireEvent.pointerDown(surface, { pointerId: 1, button: 0, clientX: 100, clientY: 100 })
+    fireEvent.pointerMove(surface, { pointerId: 1, clientX: 150, clientY: 130 })
+    fireEvent.pointerUp(surface, { pointerId: 1, clientX: 150, clientY: 130 })
+    fireEvent.keyUp(surface, { key: ' ', code: 'Space' })
+    expect(camera().translation).toEqual([zoomed.translation[0] + 50, zoomed.translation[1] + 30])
+
+    const panned = camera().translation
+    fireEvent.pointerDown(surface, { pointerId: 2, button: 1, clientX: 100, clientY: 100 })
+    fireEvent.pointerMove(surface, { pointerId: 2, clientX: 80, clientY: 70 })
+    fireEvent.pointerUp(surface, { pointerId: 2, button: 1, clientX: 80, clientY: 70 })
+    expect(camera().translation).toEqual([panned[0] - 20, panned[1] - 30])
+    expect(useKoharuStore.getState().tracing).toMatchObject({ placement: placed })
+  })
+
   it('keeps the session when Align reference is chosen again', async () => {
     const user = userEvent.setup()
     renderEditor()

@@ -838,7 +838,9 @@ export function CanvasWorkspace() {
               onTransformEnd={finishTransform}
             />
           )}
-          {page && canvasState.status === 'ready' && <TracingOverlay page={page} />}
+          {page && canvasState.status === 'ready' && (
+            <TracingOverlay page={page} spaceHeld={spaceHeld} />
+          )}
           {page && canvasState.status === 'ready' && <ReferencePickOverlay page={page} />}
           {marquee.box}
           {page && <TracingPanel page={page} />}
