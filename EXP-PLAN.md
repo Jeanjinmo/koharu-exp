@@ -127,4 +127,4 @@ Fork ini untuk **pemakaian pribadi jangka panjang**. Kecocokan dengan Koharu res
 
 ## 8. Fase 3
 
-Spesifikasi, prioritas, gelombang, checklist uji, dan pertanyaan terbuka Fase 3 ada di **`PRD-FASE3.md`**. Revisi hasil uji pemilik ada di **`PRD-REVISI-FASE3.md`**, dengan temuan dan screenshot di **`uji-fase3/`**. Bagian 4–6 dokumen ini adalah catatan Fase 1 dan tetap berguna sebagai peta kode.
+Spesifikasi, prioritas, gelombang, checklist uji, dan pertanyaan terbuka Fase 3 ada di **`PRD-FASE3.md`**. Revisi hasil uji pemilik ada di **`PRD-REVISI-FASE3.md`** (R1/R2) dan **`PRD-REVISI-2-FASE3.md`** (R3/R4, hasil uji ulang), dengan temuan dan screenshot di **`uji-fase3/`**. Bagian 4–6 dokumen ini adalah catatan Fase 1 dan tetap berguna sebagai peta kode.

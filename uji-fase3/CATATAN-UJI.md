@@ -2,25 +2,37 @@
 
 Hasil uji pemilik di Windows untuk build `feat/custom` @ `b4445470` (Actions Build #14). Format mengikuti `MANUAL-UJI-FASE3.md` §9. Gambar ada di folder ini.
 
+**Uji ulang revisi R1/R2 (build `49a59cf2`, 2026-10-22):** 14 item ✅, 2 item sebagian (R1-01 → Bug 23, R1-10 → Bug 21). Temuan baru #18–#26 untuk revisi berikutnya. Lihat bagian "Uji ulang revisi R1/R2".
+
 | # | Judul | Gelombang/fitur | Tingkat | Status |
 |---|---|---|---|---|
-| 01 | Tombol profil gelap dan tak terbaca setelah diklik | 3B – F3-18 profil | Rendah (tampilan) | Diperbaiki di R1/R2, menunggu uji pemilik |
-| 02 | `remove` dengan ID elemen meninggalkan sisa coretan teks asli | 3A – F3-2 `remove` | Sedang | Diperbaiki di R1/R2, menunggu uji pemilik |
-| 03 | Deteksi ulang area dilewati tanpa alasan, dan terblokir setelah elemen dihapus | 3A – F3-14 | Rendah–sedang | Diperbaiki di R1/R2, menunggu uji pemilik |
-| 04 | Angka zoom menumpuk di atas tombol Compare di status bar | 3C – F3-19 Compare | Rendah (tampilan) | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 01 | Tombol profil gelap dan tak terbaca setelah diklik | 3B – F3-18 profil | Rendah (tampilan) | Lolos uji ulang (2026-10-22, R1-07) |
+| 02 | `remove` dengan ID elemen meninggalkan sisa coretan teks asli | 3A – F3-2 `remove` | Sedang | Lolos uji ulang (2026-10-22, R1-02) |
+| 03 | Deteksi ulang area dilewati tanpa alasan, dan terblokir setelah elemen dihapus | 3A – F3-14 | Rendah–sedang | Lolos uji ulang (2026-10-22, R1-04) |
+| 04 | Angka zoom menumpuk di atas tombol Compare di status bar | 3C – F3-19 Compare | Rendah (tampilan) | Lolos uji ulang (2026-10-22, R1-08) |
 | 05 | Mode Slider di Compare terasa kaku (masukan UX) | 3C – F3-19 Compare | Rendah (rasa pakai) | Perlu detail |
-| 06 | Pasangan referensi tidak bisa dipindah langsung ke halaman tertentu (permintaan fitur) | 3D – F3-20 Import references | Sedang (rasa pakai) | Diperbaiki di R1/R2, menunggu uji pemilik |
-| 07 | Skip menggeser semua pasangan sesudahnya tanpa peringatan; tidak ada cara melepas satu pasangan tanpa menggeser | 3D – F3-20 Import references | Sedang (rasa pakai) | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 06 | Pasangan referensi tidak bisa dipindah langsung ke halaman tertentu (permintaan fitur) | 3D – F3-20 Import references | Sedang (rasa pakai) | Sebagian lolos (R1-10): Pair with page ✅, drag and drop ❌ → Bug 21 |
+| 07 | Skip menggeser semua pasangan sesudahnya tanpa peringatan; tidak ada cara melepas satu pasangan tanpa menggeser | 3D – F3-20 Import references | Sedang (rasa pakai) | Lolos uji ulang (2026-10-22, R1-10); lanjutan rasa pakai → Masukan 22 |
 | 08 | MCP tidak bisa tahu halaman punya referensi, apalagi melihat gambarnya, sebelum Extract | 3D – F3-20 × MCP | Rendah (sesuai PRD, kandidat mendatang) | Catatan |
-| 09 | Panel Align reference dan toolbar canvas tidak bisa digeser atau diperkecil; opacity referensi tanpa tombol reset | 3D – Align reference; UI editor | Sedang (rasa pakai) | Diperbaiki di R1/R2, menunggu uji pemilik |
-| 10 | Mode kalkir sulit dipakai di area putih: tepi referensi dan pas/tidaknya tidak terlihat | 3D – Align reference | Sedang (rasa pakai) | Diperbaiki di R1/R2, menunggu uji pemilik |
-| 11 | Mode Align tertutup oleh tombol alat/shortcut (geseran hilang); Ctrl+Z di mode Align membatalkan import referensi | 3D – Align reference | Tinggi | Diperbaiki di R1/R2, menunggu uji pemilik |
-| 12 | Tambah "Add reference…" di menu ⋯ halaman; Ctrl+drag untuk zoom ke area | 3D – Referensi, Align | Sedang (permintaan fitur) | Diperbaiki di R1/R2, menunggu uji pemilik |
-| 13 | Extract salah memasangkan teks di balon bertumpuk (dua teks referensi masuk ke satu balon, dua balon kosong) | 3D – Extract text from references | Sedang | Diperbaiki di R1/R2, menunggu uji pemilik |
-| 14 | UI tidak menandai teks yang meluber keluar balon (peringatan tidak muat baru ada untuk MCP) | Editor / F3-13 | Sedang (permintaan fitur) | Diperbaiki di R1/R2, menunggu uji pemilik |
-| 15 | Tombol Save dan "Apply to following pages" di Align terasa sama; cakupannya tidak jelas | 3D – Align reference | Rendah (rasa pakai) | Diperbaiki di R1/R2, menunggu uji pemilik |
-| 16 | Ubah status beberapa halaman sekaligus (Ctrl+klik) tidak berfungsi | 3B – F3-15 status halaman | Sedang | Diperbaiki di R1/R2, menunggu uji pemilik |
-| 17 | Saat MCP server dimatikan, agent tidak menerima hasil tool yang sedang berjalan (koneksi putus) | 3B – F3-1 | Sedang | Diperbaiki di R1/R2, menunggu uji pemilik |
+| 09 | Panel Align reference dan toolbar canvas tidak bisa digeser atau diperkecil; opacity referensi tanpa tombol reset | 3D – Align reference; UI editor | Sedang (rasa pakai) | Lolos uji ulang (2026-10-22, R1-11 + R2-01) |
+| 10 | Mode kalkir sulit dipakai di area putih: tepi referensi dan pas/tidaknya tidak terlihat | 3D – Align reference | Sedang (rasa pakai) | Lolos uji ulang (2026-10-22, R2-02) |
+| 11 | Mode Align tertutup oleh tombol alat/shortcut (geseran hilang); Ctrl+Z di mode Align membatalkan import referensi | 3D – Align reference | Tinggi | Sebagian lolos (R1-01): semua ✅ kecuali tombol dialog Save this alignment? → Bug 23 |
+| 12 | Tambah "Add reference…" di menu ⋯ halaman; Ctrl+drag untuk zoom ke area | 3D – Referensi, Align | Sedang (permintaan fitur) | Lolos uji ulang (2026-10-22, R2-03 + R2-04) |
+| 13 | Extract salah memasangkan teks di balon bertumpuk (dua teks referensi masuk ke satu balon, dua balon kosong) | 3D – Extract text from references | Sedang | Lolos uji ulang (2026-10-22, R1-03) |
+| 14 | UI tidak menandai teks yang meluber keluar balon (peringatan tidak muat baru ada untuk MCP) | Editor / F3-13 | Sedang (permintaan fitur) | Lolos uji ulang (2026-10-22, R2-05); batas ukuran terbaca → Bug 25 |
+| 15 | Tombol Save dan "Apply to following pages" di Align terasa sama; cakupannya tidak jelas | 3D – Align reference | Rendah (rasa pakai) | Lolos uji ulang (2026-10-22, R1-11) |
+| 16 | Ubah status beberapa halaman sekaligus (Ctrl+klik) tidak berfungsi | 3B – F3-15 status halaman | Sedang | Lolos uji ulang (2026-10-22, R1-05) |
+| 17 | Saat MCP server dimatikan, agent tidak menerima hasil tool yang sedang berjalan (koneksi putus) | 3B – F3-1 | Sedang | Lolos uji ulang (2026-10-22, R1-06) |
+| 18 | Settings → MCP Tools belum bisa memasang ulang Koharu ke klien (Claude Code, Grok Build, Hermes) bila pendaftarannya hilang | 3B – F3-1 | Sedang (permintaan fitur) | Diputuskan: tombol Copy saja, belum masuk PRD |
+| 19 | Activity menandai `run_pipeline` seluruh project sebagai "Page 1 · …E33.jpg" | 3B – F3-16 Activity | Rendah (tampilan) | Baru |
+| 20 | Kartu halaman yang berbadge (status/Reference) lebih tinggi dari barisnya, sehingga baris terakhirnya tertimpa kartu berikutnya | 3B/3D – daftar Pages | Rendah (tampilan) | Baru |
+| 21 | Drag and drop tidak berfungsi: pasangan di dialog Import references dan urutan halaman di daftar Pages (bawaan) tidak berubah setelah dilepas | R1-10 (#06); daftar Pages | Sedang | Baru |
+| 22 | Dialog Import references terasa kaku: Choose other files membuang pilihan lama, Undo hanya untuk Shift, Shift sulit dipahami; usulan wadah sementara + drag, Auto pair / Unpair all, pratinjau | 3D – F3-20, R1-10 | Sedang (rasa pakai) | Diputuskan, belum masuk PRD |
+| 23 | Tombol dialog "Save this alignment?" (Keep aligning / Discard / Save) tidak bisa diklik; hanya Esc yang bekerja | R1-01 (#11) Align | Tinggi | Baru |
+| 24 | Di mode Align, view tidak bisa digeser: scroll tidak menggeser view (di mode biasa bisa) | 3D – Align reference | Sedang | Baru |
+| 25 | Batas "ukuran terbaca" tetap 9 px halaman, sehingga di halaman beresolusi tinggi teks bisa mengecil sampai tak terbaca tanpa tanda | Editor / R2-05, F3-13 | Sedang | Tidak diubah: ikuti bawaan Koharu (keputusan pemilik) |
+| 26 | Kolom Source text / Reference / Translation di Inspector hanya menampilkan 3–4 baris; teks panjang harus digulir di kotak kecil | Inspector | Rendah (rasa pakai) | Usulan pemilik |
+| 27 | Di Compare side by side, toolbar alat menutupi panel referensi kiri, padahal alatnya bekerja di canvas kanan | 3C – Compare; R2-01 toolbar | Rendah (tampilan) | Usulan Claude, menunggu persetujuan pemilik |
 
 ## Hasil uji MCP oleh Claude Code (2026-10-21)
 
@@ -242,6 +254,118 @@ Project tes `pepper&carrot-chap33` (Pepper&Carrot ep. 33, raw Jepang). Halaman 4
 - **Yang diharapkan (PRD F3-1):** tool yang sedang berjalan dibiarkan selesai, hasil tersimpan, dan **jawabannya tetap dikirim ke klien** sebelum koneksi ditutup; panggilan baru ditolak dengan pesan jelas. Kalau agent hanya menerima error, ia bisa mengira pekerjaan gagal lalu mengulanginya.
 - **Petunjuk kode:** `crates/koharu-agent/src/mcp/supervisor.rs` (`stop`, ±baris 305; komentar "calls of a server that is waiting for them before it stops"), `mcp/mod.rs` `accept` (koneksi di-abort saat shutdown).
 
+## Masukan 18 — Pasang ulang Koharu ke klien MCP dari Settings
+
+- **Gelombang/fitur:** 3B – F3-1, Settings → **MCP Tools** → Server.
+- **Situasi (2026-10-22):** pendaftaran `koharu` di Claude Code (scope user, `~/.claude.json`) terhapus tanpa sengaja. Untuk memasangnya lagi pemilik harus ingat perintah `claude mcp add …` dan menyalin token dari `~/.koharu/mcp.json` sendiri. Hal yang sama bisa terjadi di Grok Build dan Hermes.
+- **Custom connector claude.ai tidak bisa dipakai:** connector dihubungi dari server Anthropic (butuh HTTPS publik) dan hanya mendukung OAuth atau tanpa login, sedangkan server Koharu hanya di `127.0.0.1` dan memakai `Authorization: Bearer`.
+- **Permintaan:** bagian baru di MCP Tools, misalnya **Connect a client**, berisi tombol salin konfigurasi supaya pemilik bisa mendaftarkan Koharu ke agent mana pun yang ia pilih.
+- **Keputusan pemilik (2026-10-22):** **tombol Copy saja.** Tanpa tombol Connect/Repair, dan Koharu tidak membaca atau mengubah config klien. Pemilik sendiri yang menempelkan hasil salinan ke agent pilihannya.
+- **Usulan bentuk:**
+  - beberapa format salin, misalnya: JSON umum (`url` + header `Authorization`), perintah Claude Code (`claude mcp add --transport http --scope user koharu …`), perintah Grok Build (`grok mcp add --transport http koharu …`), dan potongan YAML Hermes (`mcp_servers.koharu`, `timeout: 900`);
+  - token hanya masuk ke clipboard, tidak pernah tampil di layar; notifikasi singkat "Copied, includes the token";
+  - teks bantuan kecil: setelah didaftarkan, klien perlu reconnect atau dimulai ulang.
+- **Batasan:** token tidak boleh masuk log atau Activity.
+
+## Bug 19 — Activity menandai `run_pipeline` seluruh project sebagai halaman 1
+
+- **Gelombang/fitur:** 3B – F3-16 Activity log (Settings → MCP Tools).
+- **Langkah:** agent memanggil `run_pipeline` operation `ocr` tanpa `pages`, `elements`, atau `region` (seluruh project, 11 halaman).
+- **Yang terjadi:** baris Activity berbunyi "run_pipeline · Page 1 · ja_Pepper-and-Carrot_by-David-Revoy_E33.jpg · 8,2 s" (screenshot pemilik 2026-10-22, 21:18–21:19), seolah hanya halaman 1 yang diproses.
+- **Yang diharapkan:** panggilan untuk seluruh project tidak menyebut satu halaman, atau menyebut cakupannya, misalnya "All pages (11)"; panggilan dengan beberapa halaman menyebut jumlahnya.
+- **Penyebab (dicek di kode):** `crates/koharu-app/src/commands/agent/host.rs:211` `run_pipeline` memakai `first_page(snapshot, &scope)` lalu `on_page(…, page)` (baris 249), sehingga Activity menerima halaman pertama dari cakupan. Halaman pertama itu mungkin sengaja dipakai untuk **Follow agent**; kalau begitu, pisahkan halaman untuk Follow agent dari label Activity.
+- **Sering?** Selalu, untuk `run_pipeline` seluruh project.
+
+## Bug 20 — Kartu halaman berbadge tertimpa kartu berikutnya
+
+- **Gelombang/fitur:** daftar **Pages** (`packages/koharu/components/editor/PageRail.tsx`), badge status (3B – F3-15) dan badge **Reference** (3D – F3-20).
+- **Langkah:** beri satu halaman status (mis. "Translated by agent") atau referensi, lalu lihat kartunya di daftar Pages.
+- **Yang terjadi:** badge menambah satu baris, tetapi tinggi baris daftar tetap. Baris terakhir kartu ("2481 × 3503") jatuh di atas tepi kartu berikutnya, dan latar kartu berikutnya (terpilih/aktif) menutupinya (`bug20-daftar-halaman-tumpang.png`; juga terlihat di `r2-03-menu-add-reference.png` pada halaman berbadge Reference). Tanpa badge kartu pas (`r1-05-setelah-undo.png`). Dengan referensi di hampir semua halaman, setiap kartu berbadge tertimpa (`bug20-daftar-halaman-banyak-badge.png`).
+- **Yang diharapkan:** kartu berbadge tidak tumpang-tindih, misalnya tinggi baris mengikuti isi kartu, atau badge diletakkan sebaris dengan "N layers".
+- **Dugaan:** daftar halaman memakai tinggi baris tetap (virtualisasi) yang dihitung untuk kartu tanpa badge.
+- **Sering?** Selalu, pada halaman berbadge.
+
+## Bug 21 — Drag and drop di dialog Import references tidak memindahkan pasangan
+
+- **Gelombang/fitur:** R1-10 (permintaan #06), dialog **Import references** (`packages/koharu/components/editor/References.tsx`).
+- **Langkah:** import satu file `reff\sample.jpg` → jatuh ke baris 1. Seret thumbnail `sample.jpg` ke baris 5 (`…E33P03`, "No reference") dan lepaskan.
+- **Yang terjadi:** saat diseret, gambar bayangan ikut kursor dan baris 5 menyala sebagai tujuan (`bug21-drag-referensi-saat-diseret.png`). Setelah dilepas, tidak ada perubahan: `sample.jpg` tetap di baris 1 (`bug21-drag-referensi-setelah-dilepas.png`).
+- **Yang diharapkan:** referensi pindah ke baris 5 (atau bertukar bila baris tujuan berisi), seperti di test `references.test.tsx:196`.
+- **Analisis (dicek di kode):** logika `drop` dan `moveReference` (baris 142, 257) benar dan lolos test jsdom, dan `dragover` jelas sampai ke baris (baris menyala). Jadi kemungkinan event `drop` tidak pernah sampai di CEF/Windows, misalnya karena HTML5 drag tanpa `dataTransfer.setData(...)`, atau karena penanganan drag-drop tingkat jendela (Tauri/CEF) menelan `drop`. Test jsdom tidak bisa menangkap ini.
+- **Cek lanjutan (pemilik, 2026-10-22):** menyeret halaman di daftar **Pages** (fitur bawaan Koharu untuk mengubah urutan, pola kode yang sama di `PageRail.tsx`) juga gagal: bayangan kartu ikut kursor, tetapi setelah dilepas urutan tidak berubah (`bug21-drag-halaman-saat-diseret.png`, `bug21-drag-halaman-setelah-dilepas.png`). Jadi `drop` HTML5 tidak berfungsi **di seluruh aplikasi** pada build ini, bukan hanya di dialog referensi.
+- **Bukan dari perubahan fork (dicek di git):** sejak `0.83.5` fork tidak mengubah versi Tauri/CEF, konfigurasi jendela, maupun kode drag di `PageRail.tsx`.
+- **Terverifikasi di Koharu resmi 0.83.5 (pemilik, 2026-10-22):** menyeret halaman di daftar Pages juga gagal; bayangan kartu muncul, urutan tidak berubah, dan kursor tidak berubah jadi tangan (`bug21-koharu-resmi-saat-diseret.png`, `bug21-koharu-resmi-setelah-dilepas.png`). Kesan pemilik: dari sisi pengguna, Koharu memang tidak punya drag and drop. Jadi ini perilaku bawaan, tetapi fitur referensi R1-10 di fork bergantung padanya.
+- **Usulan:** ganti seret HTML5 dengan seret berbasis pointer events (seperti pegangan toolbar R2-01) untuk dua tempat: pasangan di dialog Import references dan urutan halaman di daftar Pages. Bila ingin mencoba perbaikan kecil dulu: isi `dataTransfer.setData` + `effectAllowed`/`dropEffect` di `dragstart`/`dragover`, lalu uji di Windows.
+- **Keputusan pemilik (2026-10-22): pilihan B.** Perbaiki keduanya: dialog Import references dan urutan halaman di daftar Pages. Urutan halaman tetap memakai command bawaan `movePage` (sama dengan tool MCP `move_page`), jadi hanya lapisan UI yang berubah. Beri kursor tangan (grab) pada kartu yang bisa diseret.
+- **Sering?** Selalu.
+
+## Masukan 22 — Dialog Import references terasa kaku
+
+- **Gelombang/fitur:** 3D – F3-20 dialog **Import references** (`packages/koharu/components/editor/References.tsx`), lanjutan R1-10.
+- **Temuan pemilik (2026-10-22):**
+  - **Choose other files** membuang semua file yang sudah dipilih. Contoh: `reff\sample.jpg` (= `id_…E33P03`) dipasang ke halaman 5, lalu Choose other files → `reff\sample2.jpg` (= `id_…E33P07`): `sample.jpg` hilang. Pemilik mengharapkan file baru **ditambahkan**. Di kode memang begitu: tombol itu memanggil `discard()` (mulai dari awal).
+  - Tautan **Undo** muncul setelah Shift, tetapi hilang begitu ada perubahan lain (mis. Unpair). Di kode, Undo itu hanya menyimpan satu Shift terakhir (`shift.before`) dan dihapus oleh setiap perubahan lain (`arrange` → `setShift(null)`).
+  - Shift up/down sulit dipahami; pemilik lebih suka langsung meletakkan referensi ke tempatnya.
+- **Fakta saat ini (dicek di kode):** file di **Not paired** tidak ikut di-attach. Saat Attach atau saat dialog ditutup, semua file yang belum dipakai dibuang dari daftar sementara (`discardStagedReferences`); file aslinya di disk tidak tersentuh. Belum ada tombol untuk membuang satu file dari daftar, dan belum ada tombol "pasang otomatis lagi" atau "lepas semua".
+- **Usulan bentuk (perlu keputusan pemilik):**
+  1. **Add files…** (pengganti Choose other files) **menambah** file ke daftar. File baru dipasangkan otomatis hanya ke halaman yang masih kosong; pasangan yang sudah ada tidak diganggu. File yang sama dipilih dua kali diabaikan.
+  2. **Not paired** menjadi wadah sementara yang jelas: teks "Files here are not attached", tombol × per file untuk membuangnya dari daftar.
+  3. **Drag and drop** (setelah Bug 21 diperbaiki dengan pointer events): baris ↔ baris (bertukar), baris → wadah (lepas), wadah → baris (pasang).
+  4. ~~Shift ▾ dihapus, digantikan drag and drop~~ (lihat keputusan: dibiarkan dulu). ⇅ **Pair with page…** tetap ada.
+  5. Tombol **Auto pair**: memasangkan ulang semua file dengan aturan yang sama seperti saat import (angka halaman di nama file, mis. `E33P03` ↔ `E33P03`; sisanya menurut urutan). Tombol **Unpair all**: semua file kembali ke wadah.
+  6. **Undo/Redo untuk semua perubahan** di dalam dialog (tumpukan riwayat, juga Ctrl+Z / Ctrl+Shift+Z selama dialog terbuka), bukan hanya Shift.
+  7. **Pratinjau**: klik sebuah baris untuk melihat halaman raw dan referensinya berdampingan dalam ukuran besar (bisa diperbesar), supaya pemilik bisa memastikan keduanya gambar yang sama sebelum Attach.
+- **Catatan:** pemilik menyebut dialog ini "compare"; yang dimaksud adalah dialog **Import references** (pemasangan), bukan mode Compare di status bar.
+- **Keputusan pemilik (2026-10-22):**
+  - **Auto pair** memasang ulang **semua** file (pasangan buatan tangan ikut tertimpa), supaya logikanya sederhana.
+  - **Undo/Redo** untuk semua perubahan di dialog (tombol + Ctrl+Z / Ctrl+Shift+Z), terutama supaya Auto pair dan Unpair all yang salah bisa dibatalkan. Selama dialog terbuka, Ctrl+Z **tidak boleh** menyentuh riwayat undo project (jebakan yang sama dengan #11).
+  - **Add files…** menggantikan Choose other files dan **menambah** file ke daftar. "Mulai dari awal" cukup lewat Cancel lalu buka dialog lagi.
+  - **Shift ▾ dibiarkan seperti sekarang.** Pemilik akan menilai kegunaannya setelah drag and drop dan Auto pair tersedia. (Kasus yang hanya bisa dibereskan Shift: edisi referensi punya halaman ekstra/kurang sehingga semua pasangan sesudahnya meleset satu.)
+  - **Pratinjau:** klik thumbnail (raw atau referensi) membuka pratinjau raw dan referensi berdampingan dalam ukuran besar. Ikon mata kecil di pojok kanan atas thumbnail sebagai penanda bahwa thumbnail bisa diklik. Klik tanpa menggeser = pratinjau; tekan lalu geser = drag.
+  - Butir 2 (wadah sementara dengan ×), 3 (drag and drop), dan 5 (Auto pair / Unpair all) di atas ikut masuk revisi.
+
+## Bug 23 — Tombol dialog "Save this alignment?" tidak bisa diklik
+
+- **Gelombang/fitur:** R1-01 (perbaikan #11), panel **Align reference** (`packages/koharu/components/editor/Tracing.tsx`).
+- **Langkah:** buka **View → Align reference…**, geser referensi, lalu tutup Align (Esc, ×, atau Compare) tanpa menyimpan.
+- **Yang terjadi:** dialog **Save this alignment?** muncul dengan Keep aligning / Discard / Save (`bug23-dialog-save-alignment.png`), tetapi ketiga tombol tidak bereaksi saat diklik; aplikasi seperti macet. Esc menutup dialog dan kembali ke Align (= Keep aligning).
+- **Yang diharapkan:** ketiga tombol bekerja: Keep aligning kembali ke Align, Discard menutup tanpa menyimpan, Save menyimpan lalu menutup.
+- **Penyebab (dicek di kode):** `AlertDialog` dirender di dalam `TracingPanel` (`Tracing.tsx:535`), dan `TracingPanel` adalah anak dari permukaan canvas (`CanvasWorkspace.tsx:836`). Dialog dipasang lewat portal ke `body`, tetapi event React tetap merambat ke induk React-nya. Penangan `onPointerDown` permukaan canvas (`CanvasWorkspace.tsx:621-635`) hanya mengecualikan elemen di dalam `[data-canvas-control]` dengan `closest()` pada DOM; tombol dialog berada di portal sehingga tidak lolos pengecualian itu, lalu canvas memanggil `setPointerCapture`. Akibatnya `click` jatuh ke canvas, bukan ke tombol. Esc tetap jalan karena ditangani dialog sendiri. Test jsdom memakai `fireEvent.click` tanpa pointer capture sehingga tidak menangkap ini.
+- **Usulan perbaikan:** di `onPointerDown` permukaan canvas, abaikan event yang target DOM-nya tidak berada di dalam permukaan itu (`if (!event.currentTarget.contains(event.target as Node)) return`). Ini juga melindungi menu/popup lain yang dirender lewat portal dari dalam canvas. Tambah test yang mensimulasikan pointerdown + click pada tombol dialog.
+- **Sering?** Selalu.
+
+## Bug 24 — View tidak bisa digeser di mode Align
+
+- **Gelombang/fitur:** 3D – **Align reference** (`packages/koharu/components/editor/Tracing.tsx`, `CanvasWorkspace.tsx`).
+- **Langkah:** di mode biasa, scroll menggeser view (benar). Buka **View → Align reference…**, lalu scroll di atas gambar.
+- **Yang terjadi (pemilik, 2026-10-22):** view tidak bergeser. Pemilik merasa terkunci: drag menggeser referensi (benar), tetapi tidak ada cara biasa untuk memindahkan view ke bagian lain halaman.
+- **Yang diharapkan:** sama seperti mode biasa: scroll menggeser view naik/turun, Shift+scroll kiri/kanan, Ctrl+scroll zoom. Komentar di `Tracing.tsx:55-57` juga menyatakan maksud itu ("Other wheel input still moves the camera").
+- **Analisis kode:** penangan `onWheel` lapisan Align (`Tracing.tsx:184`) hanya mengambil Alt+wheel dan tidak menghentikan event lain, jadi scroll seharusnya diteruskan ke `onWheel` permukaan canvas (`CanvasWorkspace.tsx:780`) yang menggeser kamera. Penyebab pastinya belum ketemu dari membaca kode; perlu dicek di Windows (log event wheel di lapisan Align dan permukaan canvas). Test jsdom kemungkinan lolos.
+- **Masalah terkait (dari kode, belum dicoba pemilik):** di mode Align, **Spasi+drag** dan **drag tombol tengah mouse** juga tidak menggeser view. Lapisan Align menangkap semua tekanan kiri untuk menggeser referensi tanpa memeriksa Spasi (`Tracing.tsx:147`), dan permukaan canvas mengabaikan tekanan dari elemen `[data-canvas-control]` (`CanvasWorkspace.tsx:631`) sehingga drag tombol tengah juga hilang.
+- **Usulan:** di mode Align, scroll / Shift+scroll / Ctrl+scroll bekerja seperti mode biasa; Spasi+drag dan drag tombol tengah menggeser view; drag kiri biasa tetap menggeser referensi; Alt+scroll tetap mengubah ukuran referensi.
+- **Sering?** Selalu.
+
+## Bug 25 — Batas ukuran terbaca terlalu kecil untuk halaman beresolusi tinggi
+
+- **Gelombang/fitur:** tanda teks meluber di UI (R2-05) dan peringatan MCP (F3-13); keduanya memakai diagnosis renderer.
+- **Langkah:** halaman 5 (`…E33P03`, 2481 × 3503), balon `見てのお楽しみ!` (kotak 414 × 536, Auto fit), isi terjemahan ±650 karakter.
+- **Yang terjadi:** teks mengecil menjadi sekitar 11 px halaman (hurufnya sangat kecil, `bug25-teks-mengecil-tanpa-tanda.webp`), tetapi tidak ada tanda apa pun di canvas, Layers, maupun Inspector.
+- **Penyebab (dicek di kode):** renderer hanya menandai teks di bawah `MINIMUM_FONT_SIZE = 9.0` piksel halaman (`crates/koharu-renderer/src/renderer.rs:53`, sama dengan Koharu resmi 0.83.5), dan dengan Auto fit teks hampir selalu dikecilkan dulu sebelum meluber. Pada halaman selebar 2481 px, 9 px setara ±0,4% lebar halaman, jauh di bawah ukuran dialog normal (±40–60 px di sample ini).
+- **Usulan (perlu keputusan pemilik, karena mengubah perilaku bawaan):** batas terbaca relatif terhadap ukuran halaman, misalnya `max(9, tinggi halaman × 0,8%)` (≈ 28 px untuk halaman 3503 px), atau bisa diatur di Settings. Berlaku untuk tanda di UI dan peringatan MCP.
+- **Keputusan pemilik (2026-10-22): tidak diubah**, batas tetap 9 px seperti Koharu resmi. Tanda meluber terbukti bekerja bila ukuran huruf ditetapkan (R2-05).
+
+## Masukan 26 — Kolom teks di Inspector terlalu pendek
+
+- **Gelombang/fitur:** Inspector layer teks (`packages/koharu/components/editor/Inspector.tsx`): Source text, Reference, Translation.
+- **Situasi (pemilik, 2026-10-22):** saat mengisi terjemahan panjang, kolom Translation hanya memperlihatkan 3–4 baris; sisanya harus digulir di kotak kecil (`r2-05-teks-panjang-inspector.png`).
+- **Usulan:** kolom tumbuh mengikuti isi sampai batas tertentu (mis. ±12 baris), baru setelah itu bergulir; pegangan ubah ukuran tetap ada.
+
+## Masukan 27 — Toolbar menutupi panel referensi di Compare side by side
+
+- **Gelombang/fitur:** 3C – Compare **Side by side** (`ComparePane`), toolbar alat (`packages/koharu/components/editor/ToolBar.tsx`, R2-01).
+- **Situasi:** saat Side by side aktif, area editor terbagi: kiri panel referensi/asli (hanya dilihat), kanan canvas kerja. Toolbar ditempatkan `absolute top-3 left-3` di wadah yang memuat **keduanya** (`CanvasWorkspace.tsx:608-610`, `ToolBar.tsx:75`), sehingga muncul di atas panel referensi kiri dan menutupi sebagian gambarnya (`r1-08-zoom-352.webp`), padahal alatnya bekerja di canvas kanan.
+- **Usulan:** toolbar ditempatkan relatif terhadap canvas kerja, bukan terhadap seluruh area editor. Saat Side by side, posisi bawaannya di pojok kiri atas **canvas kanan**; posisi hasil geser pemilik (R2-01) tetap diingat dan dibatasi di dalam canvas. Tanpa Side by side tidak ada yang berubah.
+
 ## Catatan Extract (bukan bug)
 
 - Setelah Extract, gambar terlihat "berantakan" karena: (1) Extract **hanya mengisi teks**, teks Jepang asli belum dihapus (perlu tahap Inpainting atau `remove`); (2) screenshot diambil dalam mode **Compare Slider**, sehingga di kiri garis tampil gambar referensi (huruf Indonesia dari edisi terjemahan) bertumpuk dengan hasil edit (`bug12-extract-tampilan.webp`).
@@ -271,6 +395,31 @@ Project tes `pepper&carrot-chap33` (Pepper&Carrot ep. 33, raw Jepang). Halaman 4
 | Undo/Redo setelah referensi hilang (dari mode Align) | ❌ | Tidak bisa dipulihkan → Bug 11, perlu reproduksi |
 | Remove reference → Undo | ✅ | Referensi kembali (setelah Extract) |
 | Referensi tidak ikut export | ✅ | MCP `export` PNG halaman 5 (`…E33P03`, ber-referensi `id`): hasil hanya raw Jepang, tanpa gambar referensi (`sample\output\from-mcp\…_2222`) |
+
+## Uji ulang revisi R1/R2 (build `49a59cf2`, mulai 2026-10-22)
+
+Checklist lengkap ada di `MANUAL-UJI-FASE3.md` §11. ⏳ = belum diuji, ✅ = lolos, ⚠️ = sebagian, ❌ = gagal (temuan baru diberi nomor mulai #18).
+
+| Item | Catatan | Hasil | Keterangan |
+|---|---|---|---|
+| R1-01 Align aman dari salah tekan, undo lokal | #11 | ⚠️ | ✅ `T`, `B`, `Delete` saat menggeser: tidak terjadi apa pun, Align tetap terbuka. ✅ Toolbar redup dengan tooltip "Close Align reference first" (`r1-01-toolbar-terkunci.webp`). ✅ Ctrl+Z / Ctrl+Shift+Z hanya memundurkan/memajukan geseran, referensi tidak lepas. ✅ Ketik angka di X/Y tanpa shortcut terpicu; pindah halaman menyimpan posisi otomatis; Remove reference → Undo → Redo → Undo bekerja. ❌ Dialog **Save this alignment?** muncul, tetapi tombol Keep aligning / Discard / Save tidak bisa diklik; hanya Esc yang menutupnya (kembali ke Align) → Bug 23 |
+| R1-02 `remove` per elemen bersih | #02 | ✅ | MCP, halaman `…E33P02`, revisi 184 → 185: `remove` dengan kelima ID elemen sekaligus (termasuk balon dua baris `ご覧あれ/この...` dan elemen tanpa `source_box`), tanpa `rect`. Ketiga balon bersih tanpa sisa goresan, bentuk balon dan ekornya utuh, rambut dan wajah di sekitarnya tidak berubah (`r1-02-sebelum-*.webp`, `r1-02-sesudah-*.webp`) |
+| R1-03 Extract tidak menggabungkan balon | #13 | ✅ | Halaman yang benar adalah **`…E33P03` (halaman 5)**, bukan `…E33P04` seperti tertulis di #13 dan manual §11 (dicek dari `bug12-extract-sesudah.webp`: tumpukan tiga balon gadis di kiri bawah). Hasil (dicek lewat MCP `inspect_page`): 5 dari 6 elemen terisi teks referensi `id`, semuanya di balon yang benar; di tumpukan, `見てのお楽しみ!` → "Kau akan lihat!" dan `兵士全員が…` → "Yang aku bisa katakan adalah …", **tidak ada gabungan**. `それは` dibiarkan kosong (seharusnya "Heh." dari referensi, tetapi tidak cocok) (`r1-03-extract-tumpukan.webp`). ✅ Inspector `それは` menampilkan "Nothing from the reference yet. Extract text from references, or read it from the reference yourself." dengan tautan **Read from reference…** (`r1-03-tanda-tidak-cocok.webp`). ✅ Notifikasi "Extracted text from references — 5 text areas got text from their reference. 1 found no match; it shows that in the Inspector." (`r1-03-notifikasi-extract.png`): jumlah "found no match" (1) sama dengan balon bertanda (1). Hanya halaman 5 yang diproses (notifikasi menghitung 6 balon = isi halaman 5 saja), jadi Extract dijalankan untuk halaman ini saja. Kelemahan yang tersisa: "Heh." di referensi tidak berhasil dicocokkan ke `それは` (tumpukan balon terdeteksi sebagai satu balon); diisi lewat Read from reference… |
+| R1-04 Deteksi area menyebut alasan | #03 | ✅ | MCP, halaman `…E33P03`. (1) `delete_elements` elemen `敵の武器は弱めた…` (rev 186), lalu `detection` `region` di balon itu: 1 elemen baru, `box` dan `source_box` sama persis dengan elemen lama, ±1,6 detik (rev 187). Teks sumbernya kosong sampai OCR dijalankan (wajar, hanya deteksi). (2) Region di balon `つまり我らの剣に…` yang masih berteks: `added_elements: []` dan `skipped` berisi `page`, `stage: detection`, `reason: "bubble … already holds text element …"` |
+| R1-05 Status beberapa halaman | #16 | ✅ | Pemilik: Ctrl+klik 2 halaman, ubah status → keduanya "Translated by agent"; satu Undo mengembalikan keduanya (`r1-05-setelah-undo.png`). Kedua halaman tetap terpilih |
+| R1-06 Jawaban tool terkirim saat server dimatikan | #17 | ✅ | **Putaran 1:** Claude Code menjalankan `run_pipeline` ocr seluruh project, pemilik mematikan switch di tengahnya. Claude Code **menerima hasil lengkap** (`completed 11/11`, 14,4 detik, rev 187 → 188). Skrip uji (`read_glossary` tiap 2 detik): 20:59:46 ok → 20:59:52 ditolak dengan pesan "Koharu's MCP server is stopping and accepts no new tool calls" → 21:00:06 koneksi ditolak (Off). **Sambung ulang:** setelah switch dinyalakan, Claude Code tersambung lagi otomatis dengan URL dan token yang sama, tanpa ubah config. **Stop now:** skrip menjalankan OCR berturut-turut; panggilan ke-3 (mulai 21:19:26) dibatalkan lewat Stop now dan klien menerima jawaban `isError` "pipeline processing was cancelled" setelah 5,3 detik; Activity mencatatnya dengan ✕ dan pesan yang sama; server lalu Off. **Catatan:** tombol Stop now hanya muncul bila ada panggilan yang sedang berjalan ("waiting for N tasks"); tanpa itu server langsung menolak panggilan baru, menunggu ≤3 detik untuk jawaban yang masih di jalan, lalu Off (sesuai kode, bukan bug). Dua `run_pipeline` sekaligus: yang kedua ditolak "another pipeline process is already running" (wajar) |
+| R1-07 Tombol profil tidak gelap | #01 | ✅ | Pemilik: setelah klik **Read-only** dengan kursor masih di atasnya, tombol langsung pink (sedikit lebih redup saat di-hover) dan teksnya terbaca (`r1-07-profil-hover.png`) |
+| R1-08 Angka zoom tidak menumpuk Compare | #04 | ✅ | Pemilik: zoom 352% (tiga digit, selebar 800%) berjarak jelas dari tombol Compare (`r1-08-zoom-352.webp`) |
+| R1-09 Ctrl+Z tanpa riwayat tanpa error | – | ✅ | Pemilik: setelah **File → Free up disk space…**, Ctrl+Z dan Ctrl+Shift+Z tidak memunculkan toast merah (di uji pertama muncul "Could not complete that action — nothing to undo"). Catatan: Free up disk space mengosongkan riwayat undo/redo (sengaja); Clear project saja tetap bisa di-Undo. Project tes sempat kosong karena Free up disk space dijalankan sebelum Clear project, lalu halaman di-import ulang (disengaja untuk project uji) |
+| R1-10 Pemasangan referensi | #06, #07 | ⚠️ | Semua lolos kecuali drag and drop (Bug 21); rasa pakai dialog → Masukan 22. ✅ Satu file `id_…E33P02.jpg` langsung jatuh ke baris 4 dari nama file. ✅ Satu file bernama lain (`reff\sample.jpg`, isi = `id_…E33P03`) jatuh ke halaman 1 menurut urutan, "1 of 11"; ujung nama file terlihat; menu **Shift ▾** berisi "Skip and shift up" dan "Empty here and shift down" beserta penjelasannya (`r1-10-satu-file-shift.png`). ❌ Seret thumbnail ke baris lain tidak memindahkan apa pun → Bug 21. ✅ ⇅ **Pair with page…** memindahkan `sample.jpg` ke halaman yang dipilih dalam satu tindakan (tombolnya hanya ikon dengan tooltip; pemilik memutuskan tetap dipertahankan). ✅ **Unpair** saat 11 of 11: baris lain tidak bergeser. ✅ Import folder `id\` langsung 11 of 11 dengan pasangan benar. ✅ Attach lalu satu Undo melepas semua referensi, Redo memasangnya lagi. ⚠️ **Choose other files** membuang semua file yang sudah dipilih, bukan menambah; tautan **Undo** hanya untuk Shift terakhir dan hilang begitu ada perubahan lain (mis. Unpair). Keduanya sesuai kode, tetapi terasa kaku → Masukan 22 |
+| R1-11 Label Save dan reset opacity | #15, #09 | ✅ | Tombol **Save (this page)** dan **Save for this and 6 following pages** (halaman 5, enam halaman sesudahnya berreferensi); notifikasi "Alignment saved for …"; tooltip Fit to page; opacity tampil "50%", tombol ↺ dan dobel-klik slider mengembalikan ke 50%; **Fit to page** mengembalikan X 0, Y 0, 2481 × 3503 (`r1-11-fit-to-page.png`). Pemilik sempat bingung beda Save (this page) dan Save for following (keduanya tampil sama bila Align dibuka lagi di halaman yang sama; bedanya terlihat di halaman sesudahnya). "Delay" yang sempat disebut ternyata tidak ada |
+| R2-01 Panel bisa digeser dan dilipat | #09 | ✅ | Toolbar (⠿) dan panel Align (judul) bisa digeser; ˄/˅ melipat dan membuka (`r2-01-align-dilipat.png`); dobel-klik mengembalikan ke tempat awal; posisi dan status lipat diingat setelah restart |
+| R2-02 Garis tepi, Difference/Tint, kedip C | #10 | ✅ | Garis putus-putus fuchsia di tepi referensi; **Normal**, **Difference** (yang pas hitam, yang meleset menyala), **Tint** (raw cyan, referensi merah, yang pas abu/hitam) (`r2-02-normal.webp`, `r2-02-difference.png`, `r2-02-tint.webp`); tahan C berkedip |
+| R2-03 Add/Replace reference per halaman | #12 | ✅ | Pemilik: menu ⋯ halaman tanpa referensi memuat **Add reference…** (`r2-03-menu-add-reference.png`). Remove reference → badge hilang. Membatalkan pemilih file membiarkan dialog Add tetap terbuka. Add dengan **Trim margins** terpasang ke halaman itu saja. Undo/Redo mengembalikan keadaan persis, termasuk versi trim: Add (trim) → Remove → Undo memunculkan lagi referensi ber-trim. **Replace** (trim → tanpa trim) → Undo memunculkan lagi versi trim → Redo kembali tanpa trim (dicek lewat Compare). Bahasa default Replace mengikuti referensi lama (Indonesian). Replace hanya diuji dengan referensi `id` (beda trim), tidak dengan bahasa lain |
+| R2-04 Ctrl+drag zoom ke area | #12 | ✅ | Pemilik: Ctrl+drag zoom ke area berfungsi |
+| R2-05 Tanda teks meluber | #14 | ✅ | Percobaan 1: terjemahan ±650 karakter di balon `見てのお楽しみ!` (halaman 5, kotak 414 × 536, Auto fit). Tidak ada tanda di Inspector maupun Layers (`r2-05-teks-panjang-inspector.png`), karena teks mengecil menjadi ±11 px dan masih di atas batas terbaca 9 px → Bug 25 (`bug25-teks-mengecil-tanpa-tanda.webp`). Percobaan 2 (lewat MCP): `set_typography` ukuran tetap 120 px tanpa Auto fit (rev 309); `set_translation` melaporkan `"font_size": 120, "overflows": true` ✅ (`r2-05-meluber-120px-render.webp`). Di UI: ✅ kotak bergaris merah di canvas mengelilingi teks yang meluber, ✅ ikon ⚠ di layer "Kau akan lihat sendiri…" (`r2-05-tanda-merah-dan-layers.webp`). ✅ Ctrl+Z (kembali ke Auto fit): kotak merah dan ⚠ hilang (`r2-05-setelah-undo.webp`). Belum dilihat: tulisan "The text runs past its frame" di Inspector. Notifikasi Extract tanpa kalimat "do not fit" saat semua teks muat: ✅. Run Translation dilewati (API berbayar) |
+
+**Keputusan pemilik (2026-10-22):** `run_pipeline` seluruh project tercatat satu langkah undo per halaman (mis. inpainting 9 halaman = 9 kali Ctrl+Z). Ini bawaan Koharu 0.83.5 (`PipelineCommitter`), jadi tetap diikuti dan tidak diubah.
 
 ## Sisa uji (belum dicoba, per 2026-10-21)
 
