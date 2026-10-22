@@ -76,6 +76,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@koharu/ui/components/t
 import { cn } from '@koharu/ui/lib/utils'
 
 const emptyPages: PageSummary[] = []
+// How tall a page card is with and without badges, so the list starts close
+// to its real layout; each card is measured once it is shown.
+const CARD_HEIGHT = 76
+const BADGED_CARD_HEIGHT = 92
 const pageStatuses: readonly PageStatus[] = [
   'not_started',
   'translated_by_agent',
@@ -87,6 +91,10 @@ interface IntentPrefetchState {
   project: string
   revision: number
   pages: Set<string>
+}
+
+function badged(page: PageSummary) {
+  return page.status !== 'not_started' || page.reference !== null
 }
 
 /**
@@ -145,7 +153,10 @@ export function PageRail() {
     count: visiblePages.length,
     getScrollElement: () => pageList.current,
     getItemKey: (index) => visiblePages[index]?.page.id ?? index,
-    estimateSize: () => 72,
+    estimateSize: (index) => {
+      const page = visiblePages[index]?.page
+      return page && badged(page) ? BADGED_CARD_HEIGHT : CARD_HEIGHT
+    },
     gap: 2,
     overscan: 6,
     // The dragged card holds the pointer, so it stays rendered while the list
@@ -431,6 +442,7 @@ export function PageRail() {
                 return (
                   <div
                     key={virtualRow.key}
+                    ref={pageVirtualizer.measureElement}
                     data-index={virtualRow.index}
                     className='absolute top-0 left-0 w-full'
                     style={{ transform: `translateY(${virtualRow.start}px)` }}
@@ -728,7 +740,7 @@ function PageItem({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        {(page.status !== 'not_started' || page.reference) && (
+        {badged(page) && (
           <div className='mt-1 flex flex-wrap gap-1'>
             {page.status !== 'not_started' && (
               <span

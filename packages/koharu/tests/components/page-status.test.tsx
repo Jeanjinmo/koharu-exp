@@ -142,6 +142,41 @@ describe('page status', () => {
   })
 })
 
+describe('page cards', () => {
+  it('places each card below the one before, however tall its badges make it', () => {
+    // Cards taller than estimated, as with a larger font, and taller still
+    // with a status badge.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.dataset.index === undefined) return 0
+        return this.querySelector('[data-status]') ? 100 : 80
+      },
+    )
+    install([
+      page('page-1', 'Page 1', 'done'),
+      page('page-2', 'Page 2', 'not_started'),
+      page('page-3', 'Page 3', 'needs_review'),
+      page('page-4', 'Page 4', 'not_started'),
+    ])
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PageRail />
+      </QueryClientProvider>,
+    )
+
+    const rows = ['Page 1', 'Page 2', 'Page 3', 'Page 4'].map((label) =>
+      screen.getByText(label).closest<HTMLElement>('[data-index]')!,
+    )
+    // Rows are 2 px apart.
+    expect(rows.map((row) => row.style.transform)).toEqual([
+      'translateY(0px)',
+      'translateY(102px)',
+      'translateY(184px)',
+      'translateY(286px)',
+    ])
+  })
+})
+
 describe('reordering pages', () => {
   const pages = [1, 2, 3, 4, 5].map((number) =>
     page(`page-${number}`, `Page ${number}`, 'not_started'),
