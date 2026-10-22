@@ -30,6 +30,11 @@ export const commands = {
 	/**  Cancels the tool calls that a stopping server is still waiting for. */
 	stopMcpNow: () => __TAURI_INVOKE<null>("stop_mcp_now"),
 	clearMcpActivity: () => __TAURI_INVOKE<null>("clear_mcp_activity"),
+	/**
+	 *  Copies what registers the running server with `client`, its URL and token
+	 *  included, to the clipboard. The token never reaches the UI.
+	 */
+	copyMcpRegistration: (client: McpClient) => __TAURI_INVOKE<null>("copy_mcp_registration", { client }),
 	subscribe: (onCanvas: Channel<CanvasState>, onJob: Channel<Job>, onDownload: Channel<Download>, onResources: Channel<ModelResources>, onProject: Channel<{
 	name: string,
 	revision: Revision,
@@ -425,6 +430,17 @@ export type LmStudioConfig = {
 export type LocalConfig = Record<string, never>;
 
 export type LoginEvent = { type: "progress"; message: string } | { type: "device_code"; verification_url: string; user_code: string };
+
+/**  A client whose registration of the server can be copied. */
+export type McpClient = 
+/**  The `mcpServers` JSON that most clients read. */
+"json" | 
+/**  A `claude mcp add` command. */
+"claude_code" | 
+/**  A `grok mcp add` command. */
+"grok_build" | 
+/**  The server's entry in Hermes's `config.yaml`. */
+"hermes";
 
 /**
  *  Settings for the agent tools served over MCP. Koharu's configuration loader

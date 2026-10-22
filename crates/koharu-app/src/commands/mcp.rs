@@ -6,9 +6,10 @@ use std::{path::PathBuf, sync::OnceLock};
 use anyhow::{Context as _, Result, anyhow};
 use koharu_agent::{
     Config, McpConfig, ToolMetadata, ToolProfile,
-    mcp::{ServerStatus, Supervisor, ToolActivity},
+    mcp::{McpClient, ServerStatus, Supervisor, ToolActivity},
 };
 use koharu_scene::EntityId;
+use koharu_secrets::ExposeSecret as _;
 use parking_lot::Mutex;
 use serde::Serialize;
 use specta::Type;
@@ -21,6 +22,9 @@ use super::{ChannelExt as _, Error, agent::KoharuHost, lifecycle};
 #[derive(Default)]
 pub(crate) struct McpState {
     supervisor: OnceLock<Supervisor<KoharuHost>>,
+    /// Kept while Koharu runs: on Linux, copied text lasts only as long as
+    /// the clipboard that set it.
+    clipboard: Mutex<Option<arboard::Clipboard>>,
 }
 
 #[derive(Default)]
@@ -275,6 +279,27 @@ pub(crate) async fn clear_mcp_activity(
 ) -> std::result::Result<(), Error> {
     state.supervisor()?.clear_activity();
     channel.channel.publish(McpEvent::ActivityCleared);
+    Ok(())
+}
+
+/// Copies what registers the running server with `client`, its URL and token
+/// included, to the clipboard. The token never reaches the UI.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn copy_mcp_registration(
+    client: McpClient,
+    state: State<'_, McpState>,
+) -> std::result::Result<(), Error> {
+    let registration = state.supervisor()?.registration(client)?;
+    let mut clipboard = state.clipboard.lock();
+    if clipboard.is_none() {
+        *clipboard = Some(arboard::Clipboard::new().context("the clipboard is unavailable")?);
+    }
+    clipboard
+        .as_mut()
+        .context("the clipboard is unavailable")?
+        .set_text(registration.expose_secret())
+        .context("failed to copy to the clipboard")?;
     Ok(())
 }
 

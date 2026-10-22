@@ -68,6 +68,8 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "reg
 console = "0.16.4"
 open = "5.4.3"
 rfd = "0.17.2"
+# Text only: the MCP settings copy a client's registration.
+arboard = { version = "3.7.0", default-features = false }
 thiserror = "2.0.20"
 blake3 = "1.8.7"
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }

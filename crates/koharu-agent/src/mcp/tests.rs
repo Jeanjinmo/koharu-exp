@@ -2,6 +2,7 @@ use std::{collections::BTreeSet, path::Path, sync::Arc, time::Duration};
 
 use anyhow::{Context as _, Result, bail};
 use async_trait::async_trait;
+use koharu_secrets::ExposeSecret as _;
 use reqwest::{StatusCode, header};
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt as _,
@@ -14,7 +15,9 @@ use rmcp::{
 use serde_json::{Value, json};
 use tokio::sync::{Notify, watch};
 
-use super::{ActivityLog, Server, ServerStatus, Shared, Supervisor, Token, write_pointer};
+use super::{
+    ActivityLog, McpClient, Server, ServerStatus, Shared, Supervisor, Token, write_pointer,
+};
 use crate::{
     Config, Control, Host, Invocation, McpConfig, Reach, Tool, ToolCall, ToolGroup, ToolMetadata,
     ToolProfile, Vision,
@@ -409,6 +412,36 @@ async fn disabled_tools_are_hidden_refused_and_announced() -> Result<()> {
         Some("Tool `view_page` is disabled in Koharu settings")
     );
     client.cancel().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn registrations_hold_the_running_url_and_token() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let (supervisor, token) = supervise(
+        FakeHost::default(),
+        McpConfig {
+            port: 0,
+            ..McpConfig::default()
+        },
+        &directory.path().join("mcp.json"),
+    )?;
+    let mut status = supervisor.status();
+    let running = reaches(&mut status, |status| running_url(status).is_some()).await?;
+    let url = running_url(&running).context("url")?;
+    assert_eq!(
+        supervisor
+            .registration(McpClient::ClaudeCode)?
+            .expose_secret(),
+        format!(
+            "claude mcp add --transport http --scope user koharu {url} --header \"Authorization: Bearer {}\"",
+            token.expose()
+        )
+    );
+
+    supervisor.set_enabled(false)?;
+    reaches(&mut status, |status| *status == ServerStatus::Off).await?;
+    assert!(supervisor.registration(McpClient::Json).is_err());
     Ok(())
 }
 

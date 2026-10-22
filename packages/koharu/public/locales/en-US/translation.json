@@ -550,6 +550,24 @@
       "allPages": "All pages ({{count}})",
       "chooseFolder": "Choose…",
       "clearActivity": "Clear",
+      "clientHints": {
+        "claude_code": "A claude mcp add command to run in a terminal.",
+        "grok_build": "A grok mcp add command to run in a terminal.",
+        "hermes": "The koharu entry under mcp_servers in Hermes's config.yaml, with a 15-minute timeout for long runs.",
+        "json": "An mcpServers entry, the JSON that most MCP clients read."
+      },
+      "clients": {
+        "claude_code": "Claude Code",
+        "grok_build": "Grok Build",
+        "hermes": "Hermes",
+        "json": "JSON for any client"
+      },
+      "connect": "Connect a client",
+      "connectDescription": "Copy what registers Koharu with an MCP client: this server's address and its access token, which Koharu copies but never shows. After registering, reconnect the client or start it again.",
+      "connectOff": "Turn on the MCP server to copy what registers it with a client.",
+      "copied": "Copied — includes the access token",
+      "copy": "Copy",
+      "copyFor": "Copy for {{client}}",
       "defaultFolder": "Use the default folder",
       "description": "Let external agents such as Claude Code, Grok Build, or Hermes work on the open project through Koharu's MCP server. These settings do not affect the built-in agent.",
       "enable": "MCP server",

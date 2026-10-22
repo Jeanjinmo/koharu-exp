@@ -13,6 +13,7 @@ import {
   type McpTool,
   type ToolMetadata,
 } from '@koharu/bridge/protocol'
+import { toast } from '@koharu/ui/components/toast'
 import { TooltipProvider } from '@koharu/ui/components/tooltip'
 
 function tool(name: string, metadata: Partial<ToolMetadata> = {}, enabled = true): McpTool {
@@ -164,6 +165,47 @@ describe('MCP tools settings', () => {
     expect(screen.getByRole('button', { name: 'Vision model' }).className).not.toContain(
       'bg-primary',
     )
+  })
+
+  it('copies what registers the running server with each client, never showing its token', async () => {
+    useKoharuStore.setState({
+      mcpStatus: { state: 'running', url: 'http://127.0.0.1:47821/mcp', clients: 0 },
+    })
+    vi.spyOn(commands, 'getMcpSettings').mockResolvedValue(settings())
+    // The backend writes the clipboard itself; nothing comes back to the UI.
+    const copy = vi.spyOn(commands, 'copyMcpRegistration').mockResolvedValue(null)
+    const notice = vi.spyOn(toast, 'add')
+    render(<McpPreferences />)
+
+    expect(await screen.findByText('Connect a client')).toBeInTheDocument()
+    expect(screen.getByText(/reconnect the client or start it again/)).toBeInTheDocument()
+    for (const [name, client] of [
+      ['JSON for any client', 'json'],
+      ['Claude Code', 'claude_code'],
+      ['Grok Build', 'grok_build'],
+      ['Hermes', 'hermes'],
+    ] as const) {
+      fireEvent.click(screen.getByRole('button', { name: `Copy for ${name}` }))
+      await waitFor(() => expect(copy).toHaveBeenLastCalledWith(client))
+    }
+    expect(copy).toHaveBeenCalledTimes(4)
+    await waitFor(() =>
+      expect(notice).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'success', title: 'Copied — includes the access token' }),
+      ),
+    )
+    expect(document.body.textContent).not.toMatch(/Bearer|Authorization/)
+  })
+
+  it('offers the copies only while the server runs', async () => {
+    useKoharuStore.setState({ mcpStatus: { state: 'off' } })
+    vi.spyOn(commands, 'getMcpSettings').mockResolvedValue(settings({ enabled: false }))
+    render(<McpPreferences />)
+
+    expect(
+      await screen.findByText('Turn on the MCP server to copy what registers it with a client.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy for Claude Code' })).toBeDisabled()
   })
 
   it('lists recent tool calls with the pages they reached and clears them', async () => {

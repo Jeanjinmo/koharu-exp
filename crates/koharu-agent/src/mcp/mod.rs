@@ -5,6 +5,7 @@ mod activity;
 mod calls;
 mod clients;
 mod handler;
+mod registration;
 mod supervisor;
 #[cfg(test)]
 mod tests;
@@ -48,6 +49,7 @@ use crate::{Config, Host, Tool};
 use self::{activity::ActivityLog, calls::Calls, clients::Clients, handler::Handler, token::Token};
 pub use self::{
     activity::ToolActivity,
+    registration::McpClient,
     supervisor::{ServerStatus, Supervisor},
 };
 

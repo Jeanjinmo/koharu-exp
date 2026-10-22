@@ -17,7 +17,12 @@ use tokio::{
     time::Instant,
 };
 
-use super::{ActivityLog, Calls, POINTER, Server, Shared, Token, ToolActivity, write_pointer};
+use koharu_secrets::SecretString;
+
+use super::{
+    ActivityLog, Calls, McpClient, POINTER, Server, Shared, Token, ToolActivity,
+    registration::registration, write_pointer,
+};
 use crate::{Config, Host, Tool, ToolProfile};
 
 /// How long a busy port is retried before starting fails.
@@ -117,6 +122,16 @@ where
     #[must_use]
     pub fn status(&self) -> watch::Receiver<ServerStatus> {
         self.inner.status.subscribe()
+    }
+
+    /// What registers the running server with `client`, its URL and token
+    /// included. It is meant for the clipboard, never for display or logs.
+    pub fn registration(&self, client: McpClient) -> Result<SecretString> {
+        let url = match &*self.inner.status.borrow() {
+            ServerStatus::Running { url, .. } => url.clone(),
+            _ => bail!("the MCP server is not running"),
+        };
+        Ok(registration(client, &url, self.inner.token()?.expose()))
     }
 
     /// Every tool the host offers, whether or not MCP clients may use it.

@@ -75,6 +75,7 @@ pub fn bindings() -> tauri_specta::Builder<tauri_runtime_cef::CefRuntime> {
             mcp::reset_mcp_export_folder,
             mcp::stop_mcp_now,
             mcp::clear_mcp_activity,
+            mcp::copy_mcp_registration,
             lifecycle::subscribe,
             lifecycle::get_project,
             lifecycle::get_pages,

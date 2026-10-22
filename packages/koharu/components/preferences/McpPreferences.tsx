@@ -1,7 +1,7 @@
 'use client'
 
 import type { TFunction } from 'i18next'
-import { Check, FolderOpen, Info, RotateCcw, X } from 'lucide-react'
+import { Check, Copy, FolderOpen, Info, RotateCcw, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -15,6 +15,7 @@ import { usePages, useProject } from '@/lib/queries'
 import { useKoharuStore } from '@/lib/store'
 import {
   commands,
+  type McpClient,
   type McpSettings,
   type McpTool,
   type PageSummary,
@@ -27,11 +28,13 @@ import { Badge } from '@koharu/ui/components/badge'
 import { Button } from '@koharu/ui/components/button'
 import { Checkbox } from '@koharu/ui/components/checkbox'
 import { Switch } from '@koharu/ui/components/switch'
+import { toast } from '@koharu/ui/components/toast'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@koharu/ui/components/tooltip'
 import { cn } from '@koharu/ui/lib/utils'
 
 const groups: readonly ToolGroup[] = ['read', 'pages', 'text', 'image', 'pipeline', 'output']
 const profiles: readonly ToolProfile[] = ['vision', 'text', 'read', 'custom']
+const clients: readonly McpClient[] = ['json', 'claude_code', 'grok_build', 'hermes']
 type ToolLabel = 'needsVision' | 'betterWithVision' | 'editsImage' | 'deletes'
 
 export function McpPreferences() {
@@ -146,6 +149,8 @@ export function McpPreferences() {
         </PreferenceRow>
       </PreferenceSection>
 
+      <ConnectClient running={status.state === 'running'} />
+
       <PreferenceSection
         title={t('settings.mcp.tools')}
         description={t('settings.mcp.toolsDescription')}
@@ -210,6 +215,48 @@ export function McpPreferences() {
 
       <ActivityLog />
     </PreferencePage>
+  )
+}
+
+/**
+ * Copies what registers Koharu with an MCP client. The text, with the
+ * server's token, goes from the backend straight to the clipboard, so it is
+ * never shown here.
+ */
+function ConnectClient({ running }: { running: boolean }) {
+  const { t } = useTranslation()
+  const copy = (client: McpClient) =>
+    void call(commands.copyMcpRegistration, client)
+      .then(() => toast.add({ type: 'success', title: t('settings.mcp.copied') }))
+      .catch(() => undefined)
+  return (
+    <PreferenceSection
+      title={t('settings.mcp.connect')}
+      description={t(running ? 'settings.mcp.connectDescription' : 'settings.mcp.connectOff')}
+    >
+      {clients.map((client) => (
+        <PreferenceRow
+          key={client}
+          title={t(`settings.mcp.clients.${client}`)}
+          description={t(`settings.mcp.clientHints.${client}`)}
+        >
+          <div className='flex h-8 items-center justify-end'>
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              disabled={!running}
+              aria-label={t('settings.mcp.copyFor', {
+                client: t(`settings.mcp.clients.${client}`),
+              })}
+              onClick={() => copy(client)}
+            >
+              <Copy /> {t('settings.mcp.copy')}
+            </Button>
+          </div>
+        </PreferenceRow>
+      ))}
+    </PreferenceSection>
   )
 }
 
