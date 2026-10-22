@@ -603,11 +603,11 @@ function PageImportMenu({
 }
 
 /**
- * Whether a click on a page row is meant for the row itself. Clicks on its
- * buttons are not, nor clicks in its menu, which React passes to the row
+ * Whether a click on an item is meant for the item itself. Clicks on its
+ * buttons are not, nor clicks in its menu, which React passes to the item
  * although the menu is rendered elsewhere in the page.
  */
-function fromRow(event: ReactMouseEvent<HTMLElement>) {
+export function ownClick(event: ReactMouseEvent<HTMLElement>) {
   const target = event.target as Element
   return event.currentTarget.contains(target) && !target.closest('button')
 }
@@ -664,11 +664,11 @@ function PageItem({
       onPointerEnter={onIntent}
       onFocus={onIntent}
       onClick={(event) => {
-        if (!fromRow(event)) return
+        if (!ownClick(event)) return
         onSelect(event.ctrlKey || event.metaKey, event.shiftKey)
       }}
       onDoubleClick={(event) => {
-        if (fromRow(event)) onRename()
+        if (ownClick(event)) onRename()
       }}
     >
       {drop && (

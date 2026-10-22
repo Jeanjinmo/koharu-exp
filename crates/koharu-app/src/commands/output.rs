@@ -37,7 +37,7 @@ impl IpcResponse for ThumbnailBytes {
 
 #[derive(Type)]
 #[specta(transparent)]
-pub(crate) struct ImageBytes(#[specta(type = Vec<u8>)] Vec<u8>);
+pub(crate) struct ImageBytes(#[specta(type = Vec<u8>)] pub(super) Vec<u8>);
 
 impl IpcResponse for ImageBytes {
     fn body(self) -> tauri::Result<tauri::ipc::InvokeResponseBody> {

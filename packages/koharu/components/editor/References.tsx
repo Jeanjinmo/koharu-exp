@@ -5,15 +5,36 @@ import {
   ArrowRight,
   ArrowUpDown,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
   FilePlus2,
   FolderOpen,
   ImagePlus,
   LoaderCircle,
+  Maximize2,
+  Redo2,
+  Undo2,
+  WandSparkles,
+  X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
-import { type ComponentProps, useEffect, useId, useMemo, useRef, useState } from 'react'
+import {
+  type ComponentProps,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { PageThumbnail } from '@/components/editor/PageRail'
+import { usePageImage } from '@/components/editor/Compare'
+import { ownClick, PageThumbnail } from '@/components/editor/PageRail'
 import { DragGhost, type DropTargetProps, usePointerDrag } from '@/components/editor/usePointerDrag'
 import { call } from '@/lib/backend'
 import { pagesKey, projectKey, refresh, usePages } from '@/lib/queries'
@@ -61,7 +82,29 @@ export type Pairs = ReadonlyMap<string, number>
 
 export type ShiftDirection = 'up' | 'down'
 
-const noPairs: Pairs = new Map()
+/**
+ * The staged references in the dialog, in the order they joined it, and the
+ * page each paired one goes to; the others wait in Not paired. `shifted`
+ * counts the pairs that the step to this arrangement shifted.
+ */
+export interface Arrangement {
+  files: readonly number[]
+  pairs: Pairs
+  shifted: number
+}
+
+/** The dialog's own undo history, kept apart from the project's. */
+interface History {
+  past: readonly Arrangement[]
+  present: Arrangement
+  future: readonly Arrangement[]
+}
+
+const emptyHistory: History = {
+  past: [],
+  present: { files: [], pairs: new Map(), shifted: 0 },
+  future: [],
+}
 
 // References are taken to be in the target language until told otherwise.
 const targetLanguageOf = (state: { preferences: Preferences | null }) =>
@@ -139,6 +182,43 @@ export function pairReferences(pages: readonly PageSummary[], names: readonly st
   return pairs
 }
 
+/** Pairs `pages` with `files`, given by their staged positions, as `pairReferences` does. */
+function pairFiles(
+  pages: readonly PageSummary[],
+  files: readonly number[],
+  names: readonly string[],
+): Pairs {
+  return new Map(
+    [
+      ...pairReferences(
+        pages,
+        files.map((file) => names[file]),
+      ),
+    ].map(([page, at]) => [page, files[at]] as const),
+  )
+}
+
+/**
+ * Adds chosen files to the dialog. Those not in it yet join it and pair, by
+ * name and then in order, with the pages that have no reference; the pairs
+ * made before stay as they are.
+ */
+export function addReferences(
+  pages: readonly PageSummary[],
+  current: Arrangement,
+  chosen: readonly number[],
+  names: readonly string[],
+): Arrangement {
+  const joining = chosen.filter((file) => !current.files.includes(file))
+  if (joining.length === 0) return current
+  const empty = pages.filter((page) => !current.pairs.has(page.id))
+  return {
+    files: [...current.files, ...joining],
+    pairs: new Map([...current.pairs, ...pairFiles(empty, joining, names)]),
+    shifted: 0,
+  }
+}
+
 /**
  * Puts a reference on a page. The reference that was there takes the place
  * the moved one came from: its page, or the references not paired.
@@ -155,19 +235,24 @@ export function moveReference(pairs: Pairs, reference: number, page: string): Pa
   return next
 }
 
+/** The pairs without the one that holds `reference`. */
+function withoutReference(pairs: Pairs, reference: number): Pairs {
+  return new Map([...pairs].filter(([, paired]) => paired !== reference))
+}
+
 /**
  * Moves every reference from a page on by one page. Up leaves out the page's
- * own reference, and the last page then takes the reference that followed its
- * own in file order unless a page has it. Down leaves the page without one,
- * and the last page's reference drops out. `shifted` counts the references
- * that changed page, apart from one left out.
+ * own reference, and the last page then takes the file that followed its own
+ * among `files` unless a page has it. Down leaves the page without one, and
+ * the last page's reference drops out. `shifted` counts the references that
+ * changed page, apart from one left out.
  */
 export function shiftReferences(
   pages: readonly PageSummary[],
   pairs: Pairs,
   page: string,
   direction: ShiftDirection,
-  count: number,
+  files: readonly number[],
 ): { pairs: Pairs; shifted: number } {
   const at = pages.findIndex((each) => each.id === page)
   if (at < 0) return { pairs, shifted: 0 }
@@ -177,12 +262,10 @@ export function shiftReferences(
   if (direction === 'up') {
     left = rows[at]
     const last = rows[rows.length - 1]
-    let following: number | null = null
-    if (last !== null) {
-      for (let reference = last + 1; reference < count && following === null; reference += 1) {
-        if (!rows.includes(reference)) following = reference
-      }
-    }
+    const following =
+      last === null
+        ? null
+        : (files.slice(files.indexOf(last) + 1).find((file) => !rows.includes(file)) ?? null)
     next = [...rows.slice(0, at), ...rows.slice(at + 1), following]
   } else {
     next = [...rows.slice(0, at), null, ...rows.slice(at, -1)]
@@ -205,6 +288,34 @@ export function shiftReferences(
   }
 }
 
+function sameArrangement(a: Arrangement, b: Arrangement) {
+  return (
+    a.files.length === b.files.length &&
+    a.files.every((file, index) => b.files[index] === file) &&
+    a.pairs.size === b.pairs.size &&
+    [...a.pairs].every(([page, file]) => b.pairs.get(page) === file)
+  )
+}
+
+function undone(history: History): History {
+  const previous = history.past.at(-1)
+  return previous
+    ? {
+        past: history.past.slice(0, -1),
+        present: previous,
+        future: [history.present, ...history.future],
+      }
+    : history
+}
+
+function redone(history: History): History {
+  const [next, ...future] = history.future
+  return next ? { past: [...history.past, history.present], present: next, future } : history
+}
+
+/** What the preview shows: a page and its reference, or a reference not paired. */
+type Previewed = { page: string } | { file: number }
+
 /** Imports a translated edition of the project and pairs it with the pages. */
 export function ReferenceImportDialog() {
   const { t } = useTranslation()
@@ -219,54 +330,92 @@ export function ReferenceImportDialog() {
   const [reading, setReading] = useState(false)
   const [attaching, setAttaching] = useState(false)
   const [staged, setStaged] = useState<Staged | null>(null)
-  const [pairs, setPairs] = useState<Pairs>(noPairs)
-  // The last shift, so its notice can take it back.
-  const [shift, setShift] = useState<{ shifted: number; before: Pairs } | null>(null)
+  const [history, setHistory] = useState(emptyHistory)
+  const [preview, setPreview] = useState<Previewed | null>(null)
+  const stagings = useRef(0)
   const notPairedLabel = useId()
   const list = useRef<HTMLOListElement>(null)
-  const referenceDrag = usePointerDrag<number>({
-    scroller: list,
-    onDrop: (reference, target) => {
-      if (target.id !== NOT_PAIRED) {
-        arrange(moveReference(pairs, reference, target.id))
-        return
-      }
-      const from = [...pairs].find(([, paired]) => paired === reference)?.[0]
-      if (from !== undefined) unpair(from)
-    },
-  })
-  const dragging = referenceDrag.dragging
+  const { files, pairs, shifted } = history.present
 
   const rows = pages.map((page) => ({ page, reference: pairs.get(page.id) ?? null }))
   const chosen = rows.flatMap(({ page, reference }) =>
     reference === null ? [] : [{ page: page.id, reference }],
   )
   const paired = new Set(chosen.map(({ reference }) => reference))
-  const unpaired = (staged?.candidates ?? []).flatMap((_, reference) =>
-    paired.has(reference) ? [] : [reference],
-  )
+  const unpaired = files.filter((file) => !paired.has(file))
+  const names = staged?.candidates.map((candidate) => candidate.name) ?? []
   const busy = reading || attaching
 
-  const arrange = (next: Pairs) => {
-    setPairs(next)
-    setShift(null)
-  }
+  // Every change to the arrangement is one step of the dialog's history.
+  const arrange = (change: (current: Arrangement) => Arrangement) =>
+    setHistory((current) => {
+      const next = change(current.present)
+      return sameArrangement(next, current.present)
+        ? current
+        : { past: [...current.past, current.present], present: next, future: [] }
+    })
 
-  const unpair = (page: string) => {
-    const next = new Map(pairs)
-    next.delete(page)
-    arrange(next)
-  }
+  // While the dialog is open, Ctrl+Z and Ctrl+Shift+Z step through its own
+  // history, ahead of the editor's shortcuts, and never reach the project's.
+  useEffect(() => {
+    if (!open) return
+    const step = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== 'z')
+        return
+      event.preventDefault()
+      event.stopPropagation()
+      setHistory(event.shiftKey ? redone : undone)
+    }
+    window.addEventListener('keydown', step, true)
+    return () => window.removeEventListener('keydown', step, true)
+  }, [open])
 
-  const shiftFrom = (page: string, direction: ShiftDirection) => {
-    const result = shiftReferences(pages, pairs, page, direction, staged?.candidates.length ?? 0)
-    setPairs(result.pairs)
-    setShift(result.shifted > 0 ? { shifted: result.shifted, before: pairs } : null)
-  }
+  const move = (reference: number, page: string) =>
+    arrange((current) => ({
+      ...current,
+      pairs: moveReference(current.pairs, reference, page),
+      shifted: 0,
+    }))
+
+  const unpair = (reference: number) =>
+    arrange((current) => ({
+      ...current,
+      pairs: withoutReference(current.pairs, reference),
+      shifted: 0,
+    }))
+
+  const remove = (reference: number) =>
+    arrange((current) => ({
+      files: current.files.filter((file) => file !== reference),
+      pairs: withoutReference(current.pairs, reference),
+      shifted: 0,
+    }))
+
+  const shiftFrom = (page: string, direction: ShiftDirection) =>
+    arrange((current) => {
+      const result = shiftReferences(pages, current.pairs, page, direction, current.files)
+      return { ...current, pairs: result.pairs, shifted: result.shifted }
+    })
+
+  const autoPair = () =>
+    arrange((current) => ({
+      ...current,
+      pairs: pairFiles(pages, current.files, names),
+      shifted: 0,
+    }))
+
+  const unpairAll = () => arrange((current) => ({ ...current, pairs: new Map(), shifted: 0 }))
+
+  const referenceDrag = usePointerDrag<number>({
+    scroller: list,
+    onDrop: (reference, target) =>
+      target.id === NOT_PAIRED ? unpair(reference) : move(reference, target.id),
+  })
+  const dragging = referenceDrag.dragging
 
   const reset = () => {
-    setPairs(noPairs)
-    setShift(null)
+    setHistory(emptyHistory)
+    setPreview(null)
   }
 
   const discard = () => {
@@ -291,16 +440,27 @@ export function ReferenceImportDialog() {
   const stage = (source: PageImportSource) => {
     setReading(true)
     void call(commands.stageReferences, source, trimMargins)
-      .then((candidates) => {
-        if (!candidates) return
-        setPairs(
-          pairReferences(
+      .then((result) => {
+        if (!result) return
+        const listed = result.chosen.filter((file) => files.includes(file)).length
+        // Staged references keep their places, so a later choice keeps the
+        // thumbnails already shown.
+        const generation = staged?.generation ?? (stagings.current += 1)
+        setStaged({ generation, candidates: result.candidates })
+        const add = (current: Arrangement) =>
+          addReferences(
             pages,
-            candidates.map((candidate) => candidate.name),
-          ),
-        )
-        setShift(null)
-        setStaged((previous) => ({ generation: (previous?.generation ?? 0) + 1, candidates }))
+            current,
+            result.chosen,
+            result.candidates.map((candidate) => candidate.name),
+          )
+        // The first files chosen are where the history starts; starting over
+        // is Cancel.
+        if (staged) arrange(add)
+        else setHistory({ past: [], present: add(emptyHistory.present), future: [] })
+        if (listed > 0) {
+          toast.add({ type: 'info', title: t('references.alreadyListed', { count: listed }) })
+        }
       })
       .catch(() => undefined)
       .finally(() => setReading(false))
@@ -326,7 +486,7 @@ export function ReferenceImportDialog() {
         if (!next) close()
       }}
     >
-      <DialogContent className='grid max-h-[min(720px,calc(100vh-4rem))] grid-rows-[auto_auto_minmax(0,1fr)_auto] sm:max-w-2xl'>
+      <DialogContent className='grid max-h-[min(760px,calc(100vh-4rem))] grid-rows-[auto_auto_minmax(0,1fr)_auto] sm:max-w-2xl'>
         <DialogHeader>
           <DialogTitle>{t('references.title')}</DialogTitle>
           <DialogDescription>{t('references.description')}</DialogDescription>
@@ -345,31 +505,60 @@ export function ReferenceImportDialog() {
         </div>
 
         {staged ? (
-          <section aria-label={t('references.pairs')} className='grid min-h-0 gap-2'>
-            <div className='flex flex-wrap items-center gap-x-2 text-[11px]'>
+          <section
+            aria-label={t('references.pairs')}
+            className='grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-2'
+          >
+            <div className='flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]'>
               <p className='text-muted-foreground' role='status'>
                 {t('references.summary', { count: chosen.length, pages: pages.length })}
                 {unpaired.length > 0 &&
                   ` · ${t('references.notPaired', { count: unpaired.length })}`}
               </p>
-              {shift && (
-                <p className='flex items-center gap-1.5'>
-                  {t('references.shifted', { count: shift.shifted })}
-                  <Button
-                    type='button'
-                    size='xs'
-                    variant='link'
-                    className='h-auto px-0 text-[11px]'
-                    disabled={busy}
-                    onClick={() => {
-                      setPairs(shift.before)
-                      setShift(null)
-                    }}
-                  >
-                    {t('references.undoShift')}
-                  </Button>
-                </p>
-              )}
+              {shifted > 0 && <p>{t('references.shifted', { count: shifted })}</p>}
+              <span className='flex-1' />
+              <Button
+                type='button'
+                size='xs'
+                variant='ghost'
+                title={t('references.autoPairHint')}
+                disabled={busy || files.length === 0}
+                onClick={autoPair}
+              >
+                <WandSparkles /> {t('references.autoPair')}
+              </Button>
+              <Button
+                type='button'
+                size='xs'
+                variant='ghost'
+                title={t('references.unpairAllHint')}
+                disabled={busy || pairs.size === 0}
+                onClick={unpairAll}
+              >
+                {t('references.unpairAll')}
+              </Button>
+              <Button
+                type='button'
+                size='icon-xs'
+                variant='ghost'
+                aria-label={t('references.undo')}
+                title={t('references.undoHint')}
+                disabled={busy || history.past.length === 0}
+                onClick={() => setHistory(undone)}
+              >
+                <Undo2 />
+              </Button>
+              <Button
+                type='button'
+                size='icon-xs'
+                variant='ghost'
+                aria-label={t('references.redo')}
+                title={t('references.redoHint')}
+                disabled={busy || history.future.length === 0}
+                onClick={() => setHistory(redone)}
+              >
+                <Redo2 />
+              </Button>
             </div>
             <ol ref={list} className='min-h-0 overflow-y-auto rounded-lg border border-border/70'>
               {rows.map(({ page, reference }, index) => (
@@ -385,55 +574,73 @@ export function ReferenceImportDialog() {
                   over={dragging?.target?.id === page.id}
                   source={reference === null || busy ? {} : referenceDrag.source(reference)}
                   target={referenceDrag.target(page.id)}
-                  onPair={(moved, to) => arrange(moveReference(pairs, moved, to))}
-                  onUnpair={() => unpair(page.id)}
+                  onPreview={() => setPreview({ page: page.id })}
+                  onPair={move}
+                  onUnpair={() => reference !== null && unpair(reference)}
                   onShift={(direction) => shiftFrom(page.id, direction)}
                 />
               ))}
             </ol>
-            {/* Shown while dragging even when empty, so a reference can be dropped off. */}
-            {(unpaired.length > 0 || dragging) && (
-              <div
-                {...referenceDrag.target(NOT_PAIRED)}
-                role='group'
-                aria-labelledby={notPairedLabel}
-                data-over={dragging?.target?.id === NOT_PAIRED}
-                className={cn(
-                  'flex min-h-9 flex-wrap items-center gap-1.5 rounded-lg text-[11px] data-[over=true]:bg-primary/[0.09]',
-                  dragging && 'outline-1 outline-offset-2 outline-border outline-dashed',
-                )}
-              >
-                <span id={notPairedLabel} className='text-muted-foreground'>
-                  {t('references.notPairedList')}
+            <div
+              {...referenceDrag.target(NOT_PAIRED)}
+              role='group'
+              aria-labelledby={notPairedLabel}
+              data-over={dragging?.target?.id === NOT_PAIRED}
+              className='grid gap-1.5 rounded-lg border border-dashed border-border p-2 text-[11px] data-[over=true]:border-primary data-[over=true]:bg-primary/[0.06]'
+            >
+              <p className='flex flex-wrap items-baseline gap-x-2'>
+                <span id={notPairedLabel} className='font-medium'>
+                  {t('references.notPairedTitle')}
                 </span>
-                {unpaired.map((reference) => (
-                  <span
-                    key={reference}
-                    {...(busy ? {} : referenceDrag.source(reference))}
-                    title={t('references.dragHint')}
-                    className={cn(
-                      'flex max-w-64 cursor-grab items-center gap-1 rounded-md border border-border/70 py-0.5 pr-0.5 pl-1 select-none active:cursor-grabbing',
-                      dragging?.item === reference && 'opacity-50',
-                    )}
-                  >
-                    <span className='grid h-8 w-6 shrink-0 place-items-center overflow-hidden rounded-sm bg-[var(--surface-well)]'>
-                      <StagedThumbnail
-                        staged={staged}
-                        reference={reference}
-                        label={staged.candidates[reference].name}
+                <span className='text-muted-foreground'>{t('references.notPairedHint')}</span>
+              </p>
+              {unpaired.length > 0 && (
+                <div className='flex flex-wrap gap-1.5'>
+                  {unpaired.map((reference) => (
+                    <span
+                      key={reference}
+                      {...(busy ? {} : referenceDrag.source(reference))}
+                      title={t('references.dragHint')}
+                      className={cn(
+                        'flex max-w-64 cursor-grab items-center gap-1 rounded-md border border-border/70 bg-background py-0.5 pr-0.5 pl-1 select-none active:cursor-grabbing',
+                        dragging?.item === reference && 'opacity-50',
+                      )}
+                      onClick={(event) => {
+                        if (ownClick(event)) setPreview({ file: reference })
+                      }}
+                    >
+                      <Peek className='h-8 w-6 rounded-sm'>
+                        <StagedThumbnail
+                          staged={staged}
+                          reference={reference}
+                          label={staged.candidates[reference].name}
+                        />
+                      </Peek>
+                      <FileName name={staged.candidates[reference].name} />
+                      <PairMenu
+                        pages={pages}
+                        page={null}
+                        disabled={busy}
+                        onPair={(page) => move(reference, page)}
                       />
+                      <Button
+                        type='button'
+                        size='icon-xs'
+                        variant='ghost'
+                        disabled={busy}
+                        aria-label={t('references.removeFile', {
+                          name: staged.candidates[reference].name,
+                        })}
+                        title={t('references.removeFileHint')}
+                        onClick={() => remove(reference)}
+                      >
+                        <X />
+                      </Button>
                     </span>
-                    <FileName name={staged.candidates[reference].name} />
-                    <PairMenu
-                      pages={pages}
-                      page={null}
-                      disabled={busy}
-                      onPair={(page) => arrange(moveReference(pairs, reference, page))}
-                    />
-                  </span>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
+            </div>
             {dragging && (
               <DragGhost x={dragging.x} y={dragging.y}>
                 <span className='flex max-w-64 items-center gap-1.5 rounded-md border border-border bg-popover p-1 pr-2 text-[11px] shadow-md'>
@@ -447,6 +654,15 @@ export function ReferenceImportDialog() {
                   <FileName name={staged.candidates[dragging.item].name} />
                 </span>
               </DragGhost>
+            )}
+            {preview && (
+              <ReferencePreview
+                previewed={preview}
+                rows={rows}
+                staged={staged}
+                onShow={setPreview}
+                onClose={() => setPreview(null)}
+              />
             )}
           </section>
         ) : (
@@ -478,9 +694,12 @@ export function ReferenceImportDialog() {
               variant='ghost'
               className='sm:mr-auto'
               disabled={busy}
-              onClick={discard}
+              aria-busy={reading}
+              title={t('references.addFilesHint')}
+              onClick={() => stage('files')}
             >
-              {t('references.chooseOther')}
+              {reading ? <LoaderCircle className='animate-spin' /> : <FilePlus2 />}
+              {t('references.addFiles')}
             </Button>
           )}
           <Button type='button' variant='ghost' disabled={busy} onClick={close}>
@@ -666,6 +885,7 @@ function PairRow({
   over,
   source,
   target,
+  onPreview,
   onPair,
   onUnpair,
   onShift,
@@ -684,6 +904,7 @@ function PairRow({
   source: ComponentProps<'div'>
   /** Makes the row a place to drop a reference on. */
   target: DropTargetProps
+  onPreview: () => void
   onPair: (reference: number, page: string) => void
   onUnpair: () => void
   onShift: (direction: ShiftDirection) => void
@@ -699,11 +920,18 @@ function PairRow({
       className='grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/60 px-2 py-1.5 last:border-b-0 data-[over=true]:bg-primary/[0.09]'
     >
       <div className='flex min-w-0 items-center gap-2'>
-        <div className='grid h-12 w-9 shrink-0 place-items-center overflow-hidden rounded bg-[var(--surface-well)]'>
-          {page.source_asset && (
-            <PageThumbnail page={page.id} asset={page.source_asset} label={page.label} />
-          )}
-        </div>
+        <button
+          type='button'
+          aria-label={t('references.preview', { label })}
+          className='shrink-0 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
+          onClick={onPreview}
+        >
+          <Peek className='h-12 w-9 rounded'>
+            {page.source_asset && (
+              <PageThumbnail page={page.id} asset={page.source_asset} label={page.label} />
+            )}
+          </Peek>
+        </button>
         <FileName name={label} className='text-[11px]' />
       </div>
       <ArrowRight className='size-3.5 text-muted-foreground' />
@@ -715,10 +943,12 @@ function PairRow({
             'flex min-w-0 cursor-grab items-center gap-2 select-none active:cursor-grabbing',
             dragged && 'opacity-50',
           )}
+          // A press that does not move is no drag, so it shows the pair.
+          onClick={onPreview}
         >
-          <div className='grid h-12 w-9 shrink-0 place-items-center overflow-hidden rounded bg-[var(--surface-well)]'>
+          <Peek className='h-12 w-9 rounded'>
             <StagedThumbnail staged={staged} reference={reference} label={candidate.name} />
-          </div>
+          </Peek>
           <span className='grid min-w-0 text-[11px]'>
             <FileName name={candidate.name} />
             {page.reference && (
@@ -837,6 +1067,39 @@ function FileName({ name, className }: { name: string; className?: string }) {
   )
 }
 
+/** A thumbnail that opens the preview, marked by an eye while hovered. */
+function Peek({ className, children }: { className: string; children: ReactNode }) {
+  return (
+    <span
+      className={cn(
+        'group/peek relative grid shrink-0 place-items-center overflow-hidden bg-[var(--surface-well)]',
+        className,
+      )}
+    >
+      {children}
+      <Eye
+        aria-hidden
+        className='absolute top-0.5 right-0.5 size-3 rounded-sm bg-background/85 p-px text-foreground opacity-0 transition-opacity group-hover/peek:opacity-100'
+      />
+    </span>
+  )
+}
+
+/** An object URL for `bytes`, revoked once they change or are gone. */
+function useObjectUrl(bytes: Uint8Array | undefined, type?: string) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!bytes) {
+      setUrl(null)
+      return
+    }
+    const next = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type }))
+    setUrl(next)
+    return () => URL.revokeObjectURL(next)
+  }, [bytes, type])
+  return url
+}
+
 function StagedThumbnail({
   staged,
   reference,
@@ -853,19 +1116,265 @@ function StagedThumbnail({
     staleTime: Number.POSITIVE_INFINITY,
     gcTime: 0,
   }).data
-  const [url, setUrl] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!bytes) return
-    const next = URL.createObjectURL(
-      new Blob([bytes.buffer as ArrayBuffer], { type: 'image/webp' }),
-    )
-    setUrl(next)
-    return () => URL.revokeObjectURL(next)
-  }, [bytes])
+  const url = useObjectUrl(bytes, 'image/webp')
 
   return url ? (
     // eslint-disable-next-line @next/next/no-img-element
     <img src={url} alt={label} draggable={false} className='size-full object-contain' />
   ) : null
+}
+
+/** How far the preview is zoomed and moved, in CSS pixels of each pane. */
+interface View {
+  scale: number
+  x: number
+  y: number
+}
+
+const fitted: View = { scale: 1, x: 0, y: 0 }
+/** The preview zooms from fitting each image to this many times larger. */
+const MAX_PREVIEW_SCALE = 8
+
+/** `view` zoomed by `factor` around a point of a pane. */
+function zoomed(view: View, factor: number, x: number, y: number): View {
+  const scale = Math.min(MAX_PREVIEW_SCALE, Math.max(1, view.scale * factor))
+  if (scale === 1) return fitted
+  const grown = scale / view.scale
+  return { scale, x: x - (x - view.x) * grown, y: y - (y - view.y) * grown }
+}
+
+/**
+ * A page's original artwork beside the reference paired with it, large
+ * enough to tell whether they are the same page. Both zoom and move
+ * together, and the arrows step through the pages. A reference that is not
+ * paired shows alone.
+ */
+function ReferencePreview({
+  previewed,
+  rows,
+  staged,
+  onShow,
+  onClose,
+}: {
+  previewed: Previewed
+  rows: ReadonlyArray<{ page: PageSummary; reference: number | null }>
+  staged: Staged
+  onShow: (previewed: Previewed) => void
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const index = 'page' in previewed ? rows.findIndex(({ page }) => page.id === previewed.page) : -1
+  const row = index >= 0 ? rows[index] : null
+  const reference = row ? row.reference : 'file' in previewed ? previewed.file : null
+  const original = usePageImage(row?.page.id ?? '', 'source', row?.page.source_asset ?? null)
+  const image = useObjectUrl(
+    useQuery({
+      queryKey: ['staged-reference-image', staged.generation, reference],
+      queryFn: async () => new Uint8Array(await call(commands.getStagedReferenceImage, reference!)),
+      enabled: reference !== null,
+      staleTime: Number.POSITIVE_INFINITY,
+      gcTime: 0,
+    }).data,
+  )
+  const [view, setView] = useState(fitted)
+  const panes = useRef<HTMLDivElement>(null)
+
+  // Each pair starts fitted.
+  const pageId = row?.page.id
+  useEffect(() => setView(fitted), [pageId, reference])
+
+  const go = (step: number) => {
+    const next = index >= 0 ? rows[index + step] : undefined
+    if (next) onShow({ page: next.page.id })
+  }
+  // The arrow keys step through the pages wherever the focus is, as the
+  // button that had it is disabled on the first or last page.
+  useEffect(() => {
+    const step = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') go(-1)
+      else if (event.key === 'ArrowRight') go(1)
+    }
+    window.addEventListener('keydown', step)
+    return () => window.removeEventListener('keydown', step)
+  })
+  const zoomBy = (factor: number) => {
+    const pane = panes.current?.firstElementChild?.getBoundingClientRect()
+    if (pane) setView((current) => zoomed(current, factor, pane.width / 2, pane.height / 2))
+  }
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+    >
+      <DialogContent className='grid h-[min(92vh,1000px)] w-[min(96vw,1400px)] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-none'>
+        <DialogHeader>
+          <DialogTitle>{t('references.previewTitle')}</DialogTitle>
+          <DialogDescription className='flex min-w-0 items-center gap-2 pr-8'>
+            <FileName
+              name={
+                row
+                  ? t('references.pageLabel', { number: index + 1, label: row.page.label })
+                  : t('references.notPairedTitle')
+              }
+            />
+            <ArrowRight className='size-3.5 shrink-0' />
+            <FileName
+              name={reference === null ? t('references.none') : staged.candidates[reference].name}
+            />
+          </DialogDescription>
+        </DialogHeader>
+        <div ref={panes} className='grid min-h-0 grid-cols-2 gap-2'>
+          <PreviewPane
+            label={t('compare.original')}
+            url={original}
+            empty={row ? t('navigator.noImage') : t('references.notPairedTitle')}
+            view={view}
+            onView={setView}
+          />
+          <PreviewPane
+            label={t('compare.reference')}
+            url={image}
+            empty={t('references.none')}
+            view={view}
+            onView={setView}
+          />
+        </div>
+        <DialogFooter className='items-center sm:justify-between'>
+          {row ? (
+            <div className='flex items-center gap-1'>
+              <Button
+                type='button'
+                size='icon-sm'
+                variant='outline'
+                aria-label={t('references.previousPage')}
+                disabled={index === 0}
+                onClick={() => go(-1)}
+              >
+                <ChevronLeft />
+              </Button>
+              <span className='min-w-16 text-center text-[11px] text-muted-foreground tabular-nums'>
+                {t('references.previewPosition', { number: index + 1, count: rows.length })}
+              </span>
+              <Button
+                type='button'
+                size='icon-sm'
+                variant='outline'
+                aria-label={t('references.nextPage')}
+                disabled={index === rows.length - 1}
+                onClick={() => go(1)}
+              >
+                <ChevronRight />
+              </Button>
+            </div>
+          ) : (
+            <span />
+          )}
+          <p className='text-[11px] text-muted-foreground'>{t('references.previewHint')}</p>
+          <div className='flex items-center gap-1'>
+            <Button
+              type='button'
+              size='icon-sm'
+              variant='outline'
+              aria-label={t('references.zoomOut')}
+              disabled={view.scale === 1}
+              onClick={() => zoomBy(1 / 1.5)}
+            >
+              <ZoomOut />
+            </Button>
+            <Button
+              type='button'
+              size='icon-sm'
+              variant='outline'
+              aria-label={t('references.fit')}
+              disabled={view.scale === 1}
+              onClick={() => setView(fitted)}
+            >
+              <Maximize2 />
+            </Button>
+            <Button
+              type='button'
+              size='icon-sm'
+              variant='outline'
+              aria-label={t('references.zoomIn')}
+              disabled={view.scale === MAX_PREVIEW_SCALE}
+              onClick={() => zoomBy(1.5)}
+            >
+              <ZoomIn />
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** One image of the preview: the wheel zooms around the pointer, dragging moves it. */
+function PreviewPane({
+  label,
+  url,
+  empty,
+  view,
+  onView,
+}: {
+  label: string
+  url: string | null
+  empty: string
+  view: View
+  onView: Dispatch<SetStateAction<View>>
+}) {
+  const pan = useRef<{ pointer: number; x: number; y: number; view: View } | null>(null)
+  return (
+    <figure
+      className='relative m-0 min-h-0 cursor-grab touch-none overflow-hidden rounded-lg bg-[var(--surface-well)] active:cursor-grabbing'
+      onWheel={(event) => {
+        const box = event.currentTarget.getBoundingClientRect()
+        const factor = Math.exp(-event.deltaY * 0.0015)
+        onView((current) =>
+          zoomed(current, factor, event.clientX - box.left, event.clientY - box.top),
+        )
+      }}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return
+        event.currentTarget.setPointerCapture(event.pointerId)
+        pan.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, view }
+      }}
+      onPointerMove={(event) => {
+        const start = pan.current
+        if (!start || start.pointer !== event.pointerId || start.view.scale === 1) return
+        onView({
+          ...start.view,
+          x: start.view.x + event.clientX - start.x,
+          y: start.view.y + event.clientY - start.y,
+        })
+      }}
+      onPointerUp={(event) => {
+        pan.current = null
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId)
+        }
+      }}
+      onPointerCancel={() => (pan.current = null)}
+    >
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt={label}
+          draggable={false}
+          className='absolute inset-0 size-full origin-top-left object-contain select-none'
+          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
+        />
+      ) : (
+        <p className='grid size-full place-items-center p-4 text-center text-[11px] text-muted-foreground'>
+          {empty}
+        </p>
+      )}
+      <figcaption className='pointer-events-none absolute top-2 left-2 rounded-md bg-background/85 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm'>
+        {label}
+      </figcaption>
+    </figure>
+  )
 }

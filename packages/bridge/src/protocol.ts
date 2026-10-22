@@ -93,11 +93,22 @@ export const commands = {
 	 */
 	getPageImage: (page: EntityId, image: PageImage) => __TAURI_INVOKE<ImageBytes>("get_page_image", { page, image }),
 	/**
-	 *  Reads reference images and keeps them until they are attached or
-	 *  discarded. `None` means the file dialog was dismissed.
+	 *  Reads reference images and adds them to the staged ones, which they keep
+	 *  until they are attached or discarded. A file whose content is already
+	 *  staged keeps its place. `None` means the file dialog was dismissed.
 	 */
-	stageReferences: (source: PageImportSource, trimMargins: boolean) => __TAURI_INVOKE<ReferenceCandidate[] | null>("stage_references", { source, trimMargins }),
+	stageReferences: (source: PageImportSource, trimMargins: boolean) => __TAURI_INVOKE<{
+	/**  Every staged reference, in the order staged. */
+	candidates: ReferenceCandidate[],
+	/**
+	 *  The positions of the chosen files among them, in the order chosen,
+	 *  including files that were already staged.
+	 */
+	chosen: number[],
+} | null>("stage_references", { source, trimMargins }),
 	getStagedReferenceThumbnail: (reference: number) => __TAURI_INVOKE<ThumbnailBytes>("get_staged_reference_thumbnail", { reference }),
+	/**  One staged reference as it would be attached, for a preview beside its page. */
+	getStagedReferenceImage: (reference: number) => __TAURI_INVOKE<ImageBytes>("get_staged_reference_image", { reference }),
 	discardStagedReferences: () => __TAURI_INVOKE<null>("discard_staged_references"),
 	/**
 	 *  Attaches staged references to pages in one undoable step, then discards
@@ -694,6 +705,17 @@ export type SourceText = {
 };
 
 export type Stage = "detection" | "ocr" | "translation" | "inpainting";
+
+/**  The staged references after more files were chosen. */
+export type StagedCandidates = {
+	/**  Every staged reference, in the order staged. */
+	candidates: ReferenceCandidate[],
+	/**
+	 *  The positions of the chosen files among them, in the order chosen,
+	 *  including files that were already staged.
+	 */
+	chosen: number[],
+};
 
 export type StartupState = {
 	preferences: Preferences,

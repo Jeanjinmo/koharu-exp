@@ -130,7 +130,7 @@ describe('pairing references', () => {
       ['three', 2],
     ])
     const shifted = (from: Pairs, at: string, direction: 'up' | 'down') => {
-      const result = shiftReferences(pages, from, at, direction, 4)
+      const result = shiftReferences(pages, from, at, direction, [0, 1, 2, 3])
       return [order(pages, result.pairs), result.shifted]
     }
     // The fourth reference follows the last page's one, so it moves in.
@@ -138,7 +138,7 @@ describe('pairing references', () => {
     expect(shifted(pairs, 'three', 'up')).toEqual([[0, 1, 3], 1])
     expect(shifted(pairs, 'two', 'down')).toEqual([[0, null, 1], 2])
     // Shifting the gap back up brings the dropped reference back.
-    const gap = shiftReferences(pages, pairs, 'two', 'down', 4).pairs
+    const gap = shiftReferences(pages, pairs, 'two', 'down', [0, 1, 2, 3]).pairs
     expect(shifted(gap, 'two', 'up')).toEqual([[0, 1, 2], 2])
     // A last page without a reference takes none in.
     expect(shifted(new Map([['one', 0]]), 'one', 'up')).toEqual([[null, null, null], 0])
@@ -163,10 +163,27 @@ function openDialog() {
   )
 }
 
+/**
+ * Stands in for staging: each call chooses the next of `picks`. A chosen file
+ * joins the staged ones unless one of the same name is staged, as one of the
+ * same content is.
+ */
+function staging(...picks: string[][]) {
+  const staged: string[] = []
+  return vi.spyOn(commands, 'stageReferences').mockImplementation(async () => {
+    const chosen = (picks.shift() ?? []).map((name) => {
+      if (!staged.includes(name)) staged.push(name)
+      return staged.indexOf(name)
+    })
+    return {
+      candidates: staged.map((name) => ({ name, width: 800, height: 1200 })),
+      chosen: [...new Set(chosen)],
+    }
+  })
+}
+
 function stage(...names: string[]) {
-  vi.spyOn(commands, 'stageReferences').mockResolvedValue(
-    names.map((name) => ({ name, width: 800, height: 1200 })),
-  )
+  staging(names)
 }
 
 describe('reference import', () => {
@@ -232,17 +249,24 @@ describe('reference import', () => {
     const source = (row: HTMLElement) => within(row).getByTitle('Drag onto a page to pair it there')
     expect(within(second).getByText('Replaces the current reference')).toBeInTheDocument()
 
-    // A press that does not move is no drag.
+    // A press that does not move is no drag: it previews the pair, and
+    // Escape closes only the preview.
     fireEvent.pointerDown(source(first), { pointerId: 1, button: 0, clientX: 40, clientY: 30 })
     fireEvent.pointerUp(source(first), { pointerId: 1, button: 0, clientX: 41, clientY: 31 })
     fireEvent.click(source(first))
+    expect(await screen.findByRole('dialog', { name: 'Preview' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Preview' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('dialog', { name: 'Import references' })).toBeInTheDocument()
     expect(within(first).getByText('a.png')).toBeInTheDocument()
 
     dragOnto(source(first), third)
     expect(within(first).getByText('c.png')).toBeInTheDocument()
     expect(within(third).getByText('a.png')).toBeInTheDocument()
 
-    const notPaired = screen.getByRole('group', { name: 'Not paired:' })
+    const notPaired = screen.getByRole('group', { name: 'Not paired' })
     expect(within(notPaired).getByText('d.png')).toBeInTheDocument()
     dragOnto(source(second), notPaired)
     expect(within(second).getByText('No reference')).toBeInTheDocument()
@@ -256,7 +280,7 @@ describe('reference import', () => {
     expect(within(notPaired).queryByText('d.png')).not.toBeInTheDocument()
   })
 
-  it('offers Not paired as a place to drop while every reference is paired', async () => {
+  it('keeps Not paired as a place to drop while every reference is paired', async () => {
     const user = userEvent.setup()
     install([page('one'), page('two')])
     stage('a.png', 'b.png')
@@ -264,12 +288,12 @@ describe('reference import', () => {
 
     await user.click(screen.getByRole('button', { name: 'Choose files…' }))
     const first = await screen.findByRole('listitem', { name: '1. one' })
-    expect(screen.queryByRole('group', { name: 'Not paired:' })).not.toBeInTheDocument()
+    const notPaired = screen.getByRole('group', { name: 'Not paired' })
+    expect(notPaired).toHaveTextContent('Files here are not attached.')
     const source = within(first).getByTitle('Drag onto a page to pair it there')
 
     fireEvent.pointerDown(source, { pointerId: 1, button: 0, clientX: 40, clientY: 30 })
     fireEvent.pointerMove(source, { pointerId: 1, clientX: 40, clientY: 90 })
-    const notPaired = screen.getByRole('group', { name: 'Not paired:' })
     place(notPaired, { x: 0, y: 300, width: 400, height: 36 })
     vi.spyOn(document, 'elementFromPoint').mockReturnValue(notPaired)
     fireEvent.pointerMove(source, { pointerId: 1, clientX: 40, clientY: 310 })
@@ -278,9 +302,7 @@ describe('reference import', () => {
     fireEvent.click(source)
 
     expect(within(first).getByText('No reference')).toBeInTheDocument()
-    expect(
-      within(screen.getByRole('group', { name: 'Not paired:' })).getByText('a.png'),
-    ).toBeVisible()
+    expect(within(notPaired).getByText('a.png')).toBeVisible()
   })
 
   it('unpairs one page in place and shifts only when asked, telling how many moved', async () => {
@@ -315,13 +337,191 @@ describe('reference import', () => {
     expect(screen.getByText('2 pairs shifted')).toBeInTheDocument()
   })
 
+  it('adds files to the list, pairing them only with empty pages and skipping files listed', async () => {
+    const user = userEvent.setup()
+    install(['one', 'two', 'three', 'four'].map((id) => page(id)))
+    const stageReferences = staging(['a.png', 'b.png'], ['c.png', 'a.png'], ['c.png'])
+    const notice = vi.spyOn(toast, 'add')
+    openDialog()
+
+    await user.click(screen.getByRole('button', { name: 'Choose files…' }))
+    await screen.findByRole('listitem', { name: '1. one' })
+    const rows = ['1. one', '2. two', '3. three', '4. four'].map((name) =>
+      screen.getByRole('listitem', { name }),
+    )
+    const references = () =>
+      rows.map((row) => within(row).queryByText(/\.png$/)?.textContent ?? 'none')
+    expect(references()).toEqual(['a.png', 'b.png', 'none', 'none'])
+
+    // A pair made by hand stays where it is when files are added.
+    await user.click(within(rows[1]).getByRole('button', { name: 'Pair with page…' }))
+    await user.click(await screen.findByRole('menuitemradio', { name: '4. four' }))
+    expect(references()).toEqual(['a.png', 'none', 'none', 'b.png'])
+
+    await user.click(screen.getByRole('button', { name: 'Add files…' }))
+    expect(stageReferences).toHaveBeenLastCalledWith('files', false)
+    await waitFor(() => expect(references()).toEqual(['a.png', 'c.png', 'none', 'b.png']))
+    expect(notice).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'info', title: '1 file was already in the list' }),
+    )
+
+    notice.mockClear()
+    await user.click(screen.getByRole('button', { name: 'Add files…' }))
+    await waitFor(() =>
+      expect(notice).toHaveBeenCalledWith(
+        expect.objectContaining({ title: '1 file was already in the list' }),
+      ),
+    )
+    expect(references()).toEqual(['a.png', 'c.png', 'none', 'b.png'])
+    expect(screen.getByRole('status')).toHaveTextContent('3 of 4 pages get a reference')
+    expect(screen.getByRole('status')).not.toHaveTextContent('not paired')
+  })
+
+  it('pairs every file again with Auto pair and moves every file out with Unpair all', async () => {
+    const user = userEvent.setup()
+    install(['p1.jpg', 'p2.jpg', 'p3.jpg'].map((name, index) => labelled(`page-${index}`, name)))
+    stage('id_p3.jpg', 'id_p1.jpg', 'id_p2.jpg')
+    openDialog()
+
+    await user.click(screen.getByRole('button', { name: 'Choose files…' }))
+    await screen.findByRole('listitem', { name: '1. p1.jpg' })
+    const rows = ['1. p1.jpg', '2. p2.jpg', '3. p3.jpg'].map((name) =>
+      screen.getByRole('listitem', { name }),
+    )
+    const references = () =>
+      rows.map((row) => within(row).queryByText(/^id_.*\.jpg$/)?.textContent ?? 'none')
+    const notPaired = screen.getByRole('group', { name: 'Not paired' })
+    expect(references()).toEqual(['id_p1.jpg', 'id_p2.jpg', 'id_p3.jpg'])
+
+    await user.click(screen.getByRole('button', { name: 'Unpair all' }))
+    expect(references()).toEqual(['none', 'none', 'none'])
+    expect(
+      within(notPaired)
+        .getAllByText(/^id_.*\.jpg$/)
+        .map((name) => name.textContent),
+    ).toEqual(['id_p3.jpg', 'id_p1.jpg', 'id_p2.jpg'])
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '0 of 3 pages get a reference · 3 references are not paired',
+    )
+
+    // Pairs made by hand are paired again too.
+    await user.click(within(notPaired).getAllByRole('button', { name: 'Pair with page…' })[0])
+    await user.click(await screen.findByRole('menuitemradio', { name: '1. p1.jpg' }))
+    expect(references()).toEqual(['id_p3.jpg', 'none', 'none'])
+    await user.click(screen.getByRole('button', { name: 'Auto pair' }))
+    expect(references()).toEqual(['id_p1.jpg', 'id_p2.jpg', 'id_p3.jpg'])
+    expect(within(notPaired).queryByText(/\.jpg$/)).not.toBeInTheDocument()
+  })
+
+  it("steps through its own history with Ctrl+Z and Ctrl+Shift+Z, never the project's", async () => {
+    const user = userEvent.setup()
+    install([page('one'), page('two')])
+    stage('a.png', 'b.png')
+    const undo = vi.spyOn(commands, 'undo').mockResolvedValue(null)
+    const redo = vi.spyOn(commands, 'redo').mockResolvedValue(null)
+    // The editor's shortcuts, project undo among them, listen on the window.
+    const editor = vi.fn()
+    window.addEventListener('keydown', editor)
+    try {
+      openDialog()
+      await user.click(screen.getByRole('button', { name: 'Choose files…' }))
+      const first = await screen.findByRole('listitem', { name: '1. one' })
+      const second = screen.getByRole('listitem', { name: '2. two' })
+      await user.click(within(first).getByRole('button', { name: 'Unpair' }))
+      await user.click(within(second).getByRole('button', { name: 'Unpair' }))
+      expect(within(second).getByText('No reference')).toBeInTheDocument()
+
+      // Also with the focus outside the dialog, where #11 reached the project.
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true })
+      expect(within(second).getByText('b.png')).toBeInTheDocument()
+      expect(within(first).getByText('No reference')).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Undo' }))
+      expect(within(first).getByText('a.png')).toBeInTheDocument()
+      // The files chosen first are where the history starts.
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true })
+      expect(within(first).getByText('a.png')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled()
+
+      fireEvent.keyDown(document.body, { key: 'Z', ctrlKey: true, shiftKey: true })
+      expect(within(first).getByText('No reference')).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Redo' }))
+      expect(within(second).getByText('No reference')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled()
+
+      expect(editor).not.toHaveBeenCalledWith(expect.objectContaining({ key: 'z' }))
+      expect(editor).not.toHaveBeenCalledWith(expect.objectContaining({ key: 'Z' }))
+      expect(undo).not.toHaveBeenCalled()
+      expect(redo).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('keydown', editor)
+    }
+  })
+
+  it('removes a file from Not paired with ×, which Undo brings back', async () => {
+    const user = userEvent.setup()
+    install([page('one')])
+    stage('a.png', 'b.png', 'c.png')
+    const attach = vi.spyOn(commands, 'attachReferences').mockResolvedValue(null)
+    openDialog()
+
+    await user.click(screen.getByRole('button', { name: 'Choose files…' }))
+    const notPaired = await screen.findByRole('group', { name: 'Not paired' })
+    expect(screen.getByRole('status')).toHaveTextContent('2 references are not paired')
+
+    await user.click(within(notPaired).getByRole('button', { name: 'Remove b.png from the list' }))
+    expect(within(notPaired).queryByText('b.png')).not.toBeInTheDocument()
+    expect(within(notPaired).getByText('c.png')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('1 reference is not paired')
+
+    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(within(notPaired).getByText('b.png')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Attach 1 reference' }))
+    expect(attach).toHaveBeenCalledWith([{ page: 'one', reference: 0 }], 'id-ID')
+  })
+
+  it('previews a page beside its reference from a thumbnail, page by page', async () => {
+    const user = userEvent.setup()
+    install([page('one'), page('two')])
+    stage('a.png', 'b.png')
+    const image = vi.spyOn(commands, 'getStagedReferenceImage').mockResolvedValue([1, 2, 3])
+    openDialog()
+
+    await user.click(screen.getByRole('button', { name: 'Choose files…' }))
+    await user.click(await screen.findByRole('button', { name: 'Preview 1. one' }))
+    const preview = await screen.findByRole('dialog', { name: 'Preview' })
+    expect(preview).toHaveTextContent('1. one')
+    expect(preview).toHaveTextContent('a.png')
+    expect(await within(preview).findByRole('img', { name: 'Reference' })).toBeInTheDocument()
+    expect(image).toHaveBeenCalledWith(0)
+    // This page has no original image to show.
+    expect(within(preview).getByText('No image')).toBeInTheDocument()
+
+    // The wheel zooms both images; Fit puts them back.
+    const fit = within(preview).getByRole('button', { name: 'Fit' })
+    expect(fit).toBeDisabled()
+    fireEvent.wheel(within(preview).getByRole('img', { name: 'Reference' }), { deltaY: -400 })
+    expect(within(preview).getByRole('img', { name: 'Reference' }).style.transform).toMatch(
+      /scale\(1\.8/,
+    )
+    await user.click(fit)
+    expect(within(preview).getByRole('img', { name: 'Reference' })).toHaveStyle({
+      transform: 'translate(0px, 0px) scale(1)',
+    })
+
+    await user.click(within(preview).getByRole('button', { name: 'Next page' }))
+    expect(preview).toHaveTextContent('2. two')
+    expect(preview).toHaveTextContent('b.png')
+    await waitFor(() => expect(image).toHaveBeenCalledWith(1))
+    expect(within(preview).getByRole('button', { name: 'Next page' })).toBeDisabled()
+    await user.keyboard('{ArrowLeft}')
+    expect(preview).toHaveTextContent('1. one')
+  })
+
   it('discards staged references when the dialog is cancelled', async () => {
     const user = userEvent.setup()
     install([page('one')])
     useKoharuStore.setState({ referenceImport: true })
-    vi.spyOn(commands, 'stageReferences').mockResolvedValue([
-      { name: 'p1.jpg', width: 800, height: 1200 },
-    ])
+    stage('p1.jpg')
     render(
       <QueryClientProvider client={queryClient}>
         <ReferenceImportDialog />

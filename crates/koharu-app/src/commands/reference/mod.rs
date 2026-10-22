@@ -1,9 +1,11 @@
 //! Translated editions of pages, attached to guide their translation.
 //!
 //! Importing references stages the images first, so they can be paired with
-//! pages before anything is written to the project. Attaching stores each one
-//! as the page's `PageReference::ASSET_ROLE` asset, which neither rendering
-//! nor export reads.
+//! pages before anything is written to the project. Files chosen later join
+//! the staged ones, which keep their positions until they are attached or
+//! discarded. Attaching stores each one as the page's
+//! `PageReference::ASSET_ROLE` asset, which neither rendering nor export
+//! reads.
 
 mod extract;
 
@@ -30,7 +32,7 @@ use super::{
     ChannelExt as _, Error,
     canvas::CanvasChannel,
     import::{self, PageImportSource},
-    output::{THUMBNAIL_EDGE, ThumbnailBytes},
+    output::{ImageBytes, THUMBNAIL_EDGE, ThumbnailBytes},
     processing::{JobId, JobKind, Processing, start_job},
     project::CurrentProject,
 };
@@ -43,7 +45,8 @@ const JPEG_QUALITY: u8 = 90;
 /// JPEG noise and paper grain still count as a plain margin.
 const MARGIN_TOLERANCE: u8 = 24;
 
-/// Reference images read from disk that are waiting to be paired with pages.
+/// Reference images read from disk that are waiting to be paired with pages,
+/// in the order they were chosen.
 #[derive(Default)]
 pub(crate) struct StagedReferences {
     images: Mutex<Vec<Arc<StagedReference>>>,
@@ -51,6 +54,8 @@ pub(crate) struct StagedReferences {
 
 struct StagedReference {
     name: String,
+    /// The BLAKE3 hash of the file as read, so choosing it again adds nothing.
+    digest: [u8; 32],
     bytes: Arc<[u8]>,
     media_type: &'static str,
     width: u32,
@@ -79,6 +84,16 @@ pub struct ReferenceCandidate {
     pub height: u32,
 }
 
+/// The staged references after more files were chosen.
+#[derive(Clone, Debug, Serialize, Type)]
+pub struct StagedCandidates {
+    /// Every staged reference, in the order staged.
+    pub candidates: Vec<ReferenceCandidate>,
+    /// The positions of the chosen files among them, in the order chosen,
+    /// including files that were already staged.
+    pub chosen: Vec<u32>,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Type)]
 pub struct ReferencePair {
     pub page: EntityId,
@@ -86,8 +101,9 @@ pub struct ReferencePair {
     pub reference: u32,
 }
 
-/// Reads reference images and keeps them until they are attached or
-/// discarded. `None` means the file dialog was dismissed.
+/// Reads reference images and adds them to the staged ones, which they keep
+/// until they are attached or discarded. A file whose content is already
+/// staged keeps its place. `None` means the file dialog was dismissed.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn stage_references(
@@ -96,7 +112,7 @@ pub(crate) async fn stage_references(
     window: WebviewWindow<CefRuntime>,
     project: State<'_, CurrentProject>,
     staged: State<'_, StagedReferences>,
-) -> std::result::Result<Option<Vec<ReferenceCandidate>>, Error> {
+) -> std::result::Result<Option<StagedCandidates>, Error> {
     project
         .project
         .lock()
@@ -109,16 +125,46 @@ pub(crate) async fn stage_references(
     let images =
         tokio_rayon::spawn(move || import::import(files, |page| prepare(page, trim_margins)))
             .await?;
-    let candidates = images
-        .iter()
-        .map(|image| ReferenceCandidate {
-            name: image.name.clone(),
-            width: image.width,
-            height: image.height,
-        })
-        .collect();
-    *staged.images.lock() = images.into_iter().map(Arc::new).collect();
-    Ok(Some(candidates))
+    Ok(Some(staged.add(images)))
+}
+
+impl StagedReferences {
+    fn add(&self, images: Vec<StagedReference>) -> StagedCandidates {
+        let mut staged = self.images.lock();
+        let mut chosen = Vec::<u32>::new();
+        for image in images {
+            let at = match staged.iter().position(|each| each.digest == image.digest) {
+                Some(at) => at,
+                None => {
+                    staged.push(Arc::new(image));
+                    staged.len() - 1
+                }
+            };
+            let at = u32::try_from(at).unwrap_or(u32::MAX);
+            if !chosen.contains(&at) {
+                chosen.push(at);
+            }
+        }
+        StagedCandidates {
+            candidates: staged
+                .iter()
+                .map(|image| ReferenceCandidate {
+                    name: image.name.clone(),
+                    width: image.width,
+                    height: image.height,
+                })
+                .collect(),
+            chosen,
+        }
+    }
+
+    fn get(&self, reference: u32) -> Result<Arc<StagedReference>> {
+        self.images
+            .lock()
+            .get(reference as usize)
+            .cloned()
+            .with_context(|| format!("reference {reference} is not staged"))
+    }
 }
 
 #[tauri::command]
@@ -127,13 +173,17 @@ pub(crate) async fn get_staged_reference_thumbnail(
     reference: u32,
     staged: State<'_, StagedReferences>,
 ) -> std::result::Result<ThumbnailBytes, Error> {
-    let image = staged
-        .images
-        .lock()
-        .get(reference as usize)
-        .cloned()
-        .with_context(|| format!("reference {reference} is not staged"))?;
-    Ok(ThumbnailBytes(image.thumbnail.clone()))
+    Ok(ThumbnailBytes(staged.get(reference)?.thumbnail.clone()))
+}
+
+/// One staged reference as it would be attached, for a preview beside its page.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn get_staged_reference_image(
+    reference: u32,
+    staged: State<'_, StagedReferences>,
+) -> std::result::Result<ImageBytes, Error> {
+    Ok(ImageBytes(staged.get(reference)?.bytes.to_vec()))
 }
 
 #[tauri::command]
@@ -350,6 +400,7 @@ fn refuse_while_processing(processing: &Processing) -> Result<()> {
 }
 
 fn prepare(page: import::Page, trim_margins: bool) -> Result<StagedReference> {
+    let digest = *blake3::hash(&page.bytes).as_bytes();
     let image = image::load_from_memory_with_format(&page.bytes, page.format)
         .with_context(|| format!("failed to decode reference image {}", page.name))?;
     let mut pixels = opaque(image);
@@ -390,6 +441,7 @@ fn prepare(page: import::Page, trim_margins: bool) -> Result<StagedReference> {
     );
     Ok(StagedReference {
         name: page.name,
+        digest,
         bytes,
         media_type,
         width: pixels.width(),
@@ -530,6 +582,43 @@ mod tests {
         );
         let blank = RgbImage::from_pixel(400, 600, Rgb([255, 255, 255]));
         assert_eq!(content_bounds(&blank), None);
+    }
+
+    fn file(name: &str, content: &[u8]) -> StagedReference {
+        StagedReference {
+            name: name.to_owned(),
+            digest: *blake3::hash(content).as_bytes(),
+            bytes: Arc::from(content),
+            media_type: "image/jpeg",
+            width: 1,
+            height: 1,
+            thumbnail: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn chosen_files_join_the_staged_ones_once() {
+        let staged = StagedReferences::default();
+        let first = staged.add(vec![file("p1.jpg", b"one"), file("p2.jpg", b"two")]);
+        assert_eq!(first.chosen, [0, 1]);
+
+        // The same content under another name is the same file, and a file
+        // chosen twice at once counts once.
+        let second = staged.add(vec![
+            file("p3.jpg", b"three"),
+            file("copy of p1.jpg", b"one"),
+            file("p3 again.jpg", b"three"),
+        ]);
+        assert_eq!(second.chosen, [2, 0]);
+        assert_eq!(
+            second
+                .candidates
+                .iter()
+                .map(|candidate| candidate.name.as_str())
+                .collect::<Vec<_>>(),
+            ["p1.jpg", "p2.jpg", "p3.jpg"]
+        );
+        assert_eq!(&*staged.get(2).unwrap().bytes, b"three");
     }
 
     #[test]

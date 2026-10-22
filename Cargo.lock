@@ -4690,6 +4690,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.23.1",
+ "blake3",
  "chrono",
  "dirs 7.0.0",
  "futures",

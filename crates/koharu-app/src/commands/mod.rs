@@ -111,6 +111,7 @@ pub fn bindings() -> tauri_specta::Builder<tauri_runtime_cef::CefRuntime> {
             output::get_page_image,
             reference::stage_references,
             reference::get_staged_reference_thumbnail,
+            reference::get_staged_reference_image,
             reference::discard_staged_references,
             reference::attach_references,
             reference::attach_reference_file,
