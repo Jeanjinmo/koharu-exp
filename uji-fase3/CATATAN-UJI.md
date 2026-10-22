@@ -11,28 +11,28 @@ Hasil uji pemilik di Windows untuk build `feat/custom` @ `b4445470` (Actions Bui
 | 03 | Deteksi ulang area dilewati tanpa alasan, dan terblokir setelah elemen dihapus | 3A – F3-14 | Rendah–sedang | Lolos uji ulang (2026-10-22, R1-04) |
 | 04 | Angka zoom menumpuk di atas tombol Compare di status bar | 3C – F3-19 Compare | Rendah (tampilan) | Lolos uji ulang (2026-10-22, R1-08) |
 | 05 | Mode Slider di Compare terasa kaku (masukan UX) | 3C – F3-19 Compare | Rendah (rasa pakai) | Perlu detail |
-| 06 | Pasangan referensi tidak bisa dipindah langsung ke halaman tertentu (permintaan fitur) | 3D – F3-20 Import references | Sedang (rasa pakai) | Sebagian lolos (R1-10): Pair with page ✅, drag and drop ❌ → Bug 21 |
+| 06 | Pasangan referensi tidak bisa dipindah langsung ke halaman tertentu (permintaan fitur) | 3D – F3-20 Import references | Sedang (rasa pakai) | Sebagian lolos (R1-10): Pair with page ✅; drag and drop: Diperbaiki di R3/R4, menunggu uji pemilik (Bug 21) |
 | 07 | Skip menggeser semua pasangan sesudahnya tanpa peringatan; tidak ada cara melepas satu pasangan tanpa menggeser | 3D – F3-20 Import references | Sedang (rasa pakai) | Lolos uji ulang (2026-10-22, R1-10); lanjutan rasa pakai → Masukan 22 |
 | 08 | MCP tidak bisa tahu halaman punya referensi, apalagi melihat gambarnya, sebelum Extract | 3D – F3-20 × MCP | Rendah (sesuai PRD, kandidat mendatang) | Catatan |
 | 09 | Panel Align reference dan toolbar canvas tidak bisa digeser atau diperkecil; opacity referensi tanpa tombol reset | 3D – Align reference; UI editor | Sedang (rasa pakai) | Lolos uji ulang (2026-10-22, R1-11 + R2-01) |
 | 10 | Mode kalkir sulit dipakai di area putih: tepi referensi dan pas/tidaknya tidak terlihat | 3D – Align reference | Sedang (rasa pakai) | Lolos uji ulang (2026-10-22, R2-02) |
-| 11 | Mode Align tertutup oleh tombol alat/shortcut (geseran hilang); Ctrl+Z di mode Align membatalkan import referensi | 3D – Align reference | Tinggi | Sebagian lolos (R1-01): semua ✅ kecuali tombol dialog Save this alignment? → Bug 23 |
+| 11 | Mode Align tertutup oleh tombol alat/shortcut (geseran hilang); Ctrl+Z di mode Align membatalkan import referensi | 3D – Align reference | Tinggi | Sebagian lolos (R1-01): semua ✅; tombol dialog Save this alignment?: Diperbaiki di R3/R4, menunggu uji pemilik (Bug 23) |
 | 12 | Tambah "Add reference…" di menu ⋯ halaman; Ctrl+drag untuk zoom ke area | 3D – Referensi, Align | Sedang (permintaan fitur) | Lolos uji ulang (2026-10-22, R2-03 + R2-04) |
 | 13 | Extract salah memasangkan teks di balon bertumpuk (dua teks referensi masuk ke satu balon, dua balon kosong) | 3D – Extract text from references | Sedang | Lolos uji ulang (2026-10-22, R1-03) |
 | 14 | UI tidak menandai teks yang meluber keluar balon (peringatan tidak muat baru ada untuk MCP) | Editor / F3-13 | Sedang (permintaan fitur) | Lolos uji ulang (2026-10-22, R2-05); batas ukuran terbaca → Bug 25 |
 | 15 | Tombol Save dan "Apply to following pages" di Align terasa sama; cakupannya tidak jelas | 3D – Align reference | Rendah (rasa pakai) | Lolos uji ulang (2026-10-22, R1-11) |
 | 16 | Ubah status beberapa halaman sekaligus (Ctrl+klik) tidak berfungsi | 3B – F3-15 status halaman | Sedang | Lolos uji ulang (2026-10-22, R1-05) |
 | 17 | Saat MCP server dimatikan, agent tidak menerima hasil tool yang sedang berjalan (koneksi putus) | 3B – F3-1 | Sedang | Lolos uji ulang (2026-10-22, R1-06) |
-| 18 | Settings → MCP Tools belum bisa memasang ulang Koharu ke klien (Claude Code, Grok Build, Hermes) bila pendaftarannya hilang | 3B – F3-1 | Sedang (permintaan fitur) | Diputuskan: tombol Copy saja, belum masuk PRD |
-| 19 | Activity menandai `run_pipeline` seluruh project sebagai "Page 1 · …E33.jpg" | 3B – F3-16 Activity | Rendah (tampilan) | Baru |
-| 20 | Kartu halaman yang berbadge (status/Reference) lebih tinggi dari barisnya, sehingga baris terakhirnya tertimpa kartu berikutnya | 3B/3D – daftar Pages | Rendah (tampilan) | Baru |
-| 21 | Drag and drop tidak berfungsi: pasangan di dialog Import references dan urutan halaman di daftar Pages (bawaan) tidak berubah setelah dilepas | R1-10 (#06); daftar Pages | Sedang | Baru |
-| 22 | Dialog Import references terasa kaku: Choose other files membuang pilihan lama, Undo hanya untuk Shift, Shift sulit dipahami; usulan wadah sementara + drag, Auto pair / Unpair all, pratinjau | 3D – F3-20, R1-10 | Sedang (rasa pakai) | Diputuskan, belum masuk PRD |
-| 23 | Tombol dialog "Save this alignment?" (Keep aligning / Discard / Save) tidak bisa diklik; hanya Esc yang bekerja | R1-01 (#11) Align | Tinggi | Baru |
-| 24 | Di mode Align, view tidak bisa digeser: scroll tidak menggeser view (di mode biasa bisa) | 3D – Align reference | Sedang | Baru |
+| 18 | Settings → MCP Tools belum bisa memasang ulang Koharu ke klien (Claude Code, Grok Build, Hermes) bila pendaftarannya hilang | 3B – F3-1 | Sedang (permintaan fitur) | Diperbaiki di R3/R4, menunggu uji pemilik |
+| 19 | Activity menandai `run_pipeline` seluruh project sebagai "Page 1 · …E33.jpg" | 3B – F3-16 Activity | Rendah (tampilan) | Diperbaiki di R3/R4, menunggu uji pemilik |
+| 20 | Kartu halaman yang berbadge (status/Reference) lebih tinggi dari barisnya, sehingga baris terakhirnya tertimpa kartu berikutnya | 3B/3D – daftar Pages | Rendah (tampilan) | Diperbaiki di R3/R4, menunggu uji pemilik |
+| 21 | Drag and drop tidak berfungsi: pasangan di dialog Import references dan urutan halaman di daftar Pages (bawaan) tidak berubah setelah dilepas | R1-10 (#06); daftar Pages | Sedang | Diperbaiki di R3/R4, menunggu uji pemilik |
+| 22 | Dialog Import references terasa kaku: Choose other files membuang pilihan lama, Undo hanya untuk Shift, Shift sulit dipahami; usulan wadah sementara + drag, Auto pair / Unpair all, pratinjau | 3D – F3-20, R1-10 | Sedang (rasa pakai) | Diperbaiki di R3/R4, menunggu uji pemilik |
+| 23 | Tombol dialog "Save this alignment?" (Keep aligning / Discard / Save) tidak bisa diklik; hanya Esc yang bekerja | R1-01 (#11) Align | Tinggi | Diperbaiki di R3/R4, menunggu uji pemilik |
+| 24 | Di mode Align, view tidak bisa digeser: scroll tidak menggeser view (di mode biasa bisa) | 3D – Align reference | Sedang | Diperbaiki di R3/R4, menunggu uji pemilik |
 | 25 | Batas "ukuran terbaca" tetap 9 px halaman, sehingga di halaman beresolusi tinggi teks bisa mengecil sampai tak terbaca tanpa tanda | Editor / R2-05, F3-13 | Sedang | Tidak diubah: ikuti bawaan Koharu (keputusan pemilik) |
-| 26 | Kolom Source text / Reference / Translation di Inspector hanya menampilkan 3–4 baris; teks panjang harus digulir di kotak kecil | Inspector | Rendah (rasa pakai) | Usulan pemilik |
-| 27 | Di Compare side by side, toolbar alat menutupi panel referensi kiri, padahal alatnya bekerja di canvas kanan | 3C – Compare; R2-01 toolbar | Rendah (tampilan) | Usulan Claude, menunggu persetujuan pemilik |
+| 26 | Kolom Source text / Reference / Translation di Inspector hanya menampilkan 3–4 baris; teks panjang harus digulir di kotak kecil | Inspector | Rendah (rasa pakai) | Diperbaiki di R3/R4, menunggu uji pemilik |
+| 27 | Di Compare side by side, toolbar alat menutupi panel referensi kiri, padahal alatnya bekerja di canvas kanan | 3C – Compare; R2-01 toolbar | Rendah (tampilan) | Diperbaiki di R3/R4, menunggu uji pemilik |
 
 ## Hasil uji MCP oleh Claude Code (2026-10-21)
 
